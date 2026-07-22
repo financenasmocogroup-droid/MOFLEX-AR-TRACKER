@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>MOFLEX — Enterprise Finance</title>
+<link rel="stylesheet" href="css/style.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sb-logo">
+      <div class="sb-logo-icon" style="background:#fff;border-radius:12px;padding:8px;display:flex;align-items:center;justify-content:center;">
+      <img src="assets/Moflex logo.png" alt="MOFLEX" style="height:35px;width:auto;display:block;"/>
+      </div>
+      <div>
+        <div class="sb-logo-name">MOFLEX</div>
+        <div class="sb-logo-sub">ENTERPRISE FINANCE</div>
+      </div>
+    </div>
+
+    <nav class="sb-nav" role="navigation" aria-label="Menu utama">
+      <a class="nav-item" id="nav-exec" href="#" onclick="navigateTo('exec');return false;">
+        <i class="nav-icon">⬛</i>
+        <span>Executive Summary</span>
+      </a>
+      <a class="nav-item active" id="nav-ar" href="#" onclick="navigateTo('ar');return false;">
+        <i class="nav-icon">📄</i>
+        <span>AR Tracker</span>
+      </a>
+      <a class="nav-item" id="nav-credit" href="#" onclick="navigateTo('credit');return false;">
+        <i class="nav-icon">🛡</i>
+        <span>Credit Scoring</span>
+      </a>
+      <div class="nav-divider"></div>
+      <a class="nav-item" id="nav-settings" href="#" onclick="navigateTo('settings');return false;">
+        <i class="nav-icon">⚙️</i>
+        <span>Settings</span>
+      </a>
+    </nav>
+
+    <div class="sb-user" id="sbUser">
+      <div class="sb-avatar" id="sbAvatar">U</div>
+      <div class="sb-user-info">
+        <div class="sb-user-name" id="sbUserName">User</div>
+        <div class="sb-user-role" id="sbUserRole">—</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="main-wrap">
+
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <span class="topbar-title" id="topbarTitle">AR Tracker</span>
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="text" class="search-input" id="globalSearch"
+          placeholder="Cari invoice, customer, atau laporan..."
+          autocomplete="off"
+          oninput="handleGlobalSearch(this.value)"
+          onfocus="showSearchDropdown()"
+        />
+        <div class="search-dropdown" id="searchDropdown" style="display:none;"></div>
+      </div>
+      <div class="topbar-right">
+        <div class="branch-badge" id="branchBadgeWrap">
+          <span>🏢</span>
+          <span id="branchLabel">Nasmoco Kaligawe</span>
+        </div>
+        <button class="topbar-action-btn" onclick="document.getElementById('fileInput').click()" id="btnUpload" title="Upload XLS">
+          ↑ Upload XLS
+        </button>
+        <button class="topbar-action-btn" onclick="openExportModal()" id="btnExport" title="Export Data">
+          📤 Export
+        </button>
+        <button class="topbar-action-btn primary" onclick="openReportModal()" id="btnReport" title="Generate Report">
+          📋 Report
+        </button>
+       <div class="topbar-avatar" id="topbarAvatar" onclick="toggleAvatarMenu()" style="cursor:pointer;">U</div>
+<div id="avatarMenu" style="display:none;position:absolute;top:52px;right:16px;background:#fff;border:0.5px solid var(--border);border-radius:var(--r-md);box-shadow:var(--shadow-md);z-index:300;min-width:180px;padding:8px 0;">
+  <div style="padding:10px 16px;border-bottom:0.5px solid var(--border);">
+    <p style="font-size:13px;font-weight:600;" id="menuUserName">User</p>
+    <p style="font-size:11px;color:var(--gray-400);" id="menuUserRole">—</p>
+  </div>
+  <div onclick="Api.logout()" style="padding:10px 16px;font-size:13px;color:var(--red);cursor:pointer;display:flex;align-items:center;gap:8px;">
+    🚪 Logout
+  </div>
+</div>
+      </div>
+    </header>
+
+    <!-- PAGE CONTENT -->
+    <main class="page-content" id="pageContent">
+
+      <!-- EXEC SUMMARY -->
+      <div class="page" id="page-exec" style="display:none;">
+        <div id="exec-content"></div>
+      </div>
+
+      <!-- AR TRACKER -->
+      <div class="page" id="page-ar">
+        <!-- Sub-tabs -->
+        <div class="subtab-bar" id="arSubtabs">
+          <button class="subtab active" onclick="switchARTab('dashboard',this)">Dashboard</button>
+          <button class="subtab" onclick="switchARTab('monitoring',this)">Monitoring Invoice</button>
+          <button class="subtab" onclick="switchARTab('aging',this)">Aging Analysis</button>
+        </div>
+
+        <!-- Bulk bar -->
+        <div id="bulkBar" style="display:none;background:#1e40af;color:#fff;border-radius:8px;padding:10px 16px;margin-bottom:12px;display:none;align-items:center;gap:12px;">
+          <span class="bulk-count" style="font-size:13px;font-weight:500;">0 invoice dipilih</span>
+          <button data-action="openBulkModal" style="background:#fff;color:#1e40af;padding:6px 14px;border:none;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;">⚡ Multiple Execution</button>
+          <button data-action="clearSelection" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);padding:6px 12px;border-radius:6px;font-size:13px;cursor:pointer;margin-left:auto;">Batal Pilih</button>
+        </div>
+
+        <div id="ar-tab-dashboard"><div id="arDashboardContent"></div></div>
+        <div id="ar-tab-monitoring" style="display:none;"><div id="monitoringContent"></div></div>
+        <div id="ar-tab-aging" style="display:none;"><div id="agingContent"></div></div>
+      </div>
+
+      <!-- CREDIT SCORING -->
+      <div class="page" id="page-credit" style="display:none;">
+        <div class="subtab-bar" id="creditSubtabs">
+          <button class="subtab active" onclick="switchCreditTab('dashboard',this)">Dashboard</button>
+          <button class="subtab" onclick="switchCreditTab('customers',this)">Customer List</button>
+          <button class="subtab" onclick="switchCreditTab('input',this)">Input Data</button>
+        </div>
+        <div id="credit-tab-dashboard"><div id="creditDashContent"></div></div>
+        <div id="credit-tab-customers" style="display:none;"><div id="creditCustContent"></div></div>
+        <div id="credit-tab-input" style="display:none;"><div id="creditInputContent"></div></div>
+      </div>
+
+      <!-- SETTINGS -->
+      <div class="page" id="page-settings" style="display:none;">
+        <div id="settingsContent"></div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- ===================== MODALS ===================== -->
+
+<!-- ADD INVOICE MODAL -->
+<div id="addModal" class="modal-overlay" style="display:none;">
+  <div class="modal">
+    <div class="modal-header">
+      <strong>Tambah Invoice Manual</strong>
+      <button class="modal-close" onclick="closeModal('addModal')">×</button>
+    </div>
+    <div id="addFormFields" class="modal-body"></div>
+    <div class="modal-footer">
+      <button class="btn-ghost" onclick="closeModal('addModal')">Batal</button>
+      <button class="btn-primary" onclick="submitAddForm()">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<!-- INVOICE DETAIL MODAL -->
+<div id="detailModal" class="modal-overlay" style="display:none;">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <strong id="detailModalTitle">Detail Invoice</strong>
+      <button class="modal-close" onclick="closeModal('detailModal')">×</button>
+    </div>
+    <div id="detailModalContent" class="modal-body"></div>
+  </div>
+</div>
+
+<!-- LUNAS MODAL -->
+<div id="lunasModal" class="modal-overlay" style="display:none;">
+  <div class="modal" style="width:420px;">
+    <div class="modal-header">
+      <strong>Konfirmasi Lunas</strong>
+      <button class="modal-close" onclick="closeModal('lunasModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <p id="lunasInfo" class="modal-info-text"></p>
+      <div class="form-group">
+        <label class="form-label">Tanggal Lunas</label>
+        <input type="date" id="lunasDate" class="form-input"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Nominal Diterima (Rp)</label>
+        <input type="number" id="lunasNominal" oninput="updateLunasSelisih()" placeholder="0" class="form-input"/>
+        <div id="lunasSelisihInfo" style="margin-top:6px;"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Keterangan Selisih</label>
+        <select id="lunasKetSelect" class="form-input" style="margin-bottom:6px;"></select>
+        <input type="text" id="lunasKetCustom" placeholder="Keterangan tambahan..." class="form-input"/>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" onclick="closeModal('lunasModal')">Batal</button>
+      <button class="btn-green" onclick="confirmLunas()">✓ Tandai Lunas</button>
+    </div>
+  </div>
+</div>
+
+<!-- BULK MODAL -->
+<div id="bulkModal" class="modal-overlay" style="display:none;">
+  <div id="bulkModalInner"></div>
+</div>
+
+<!-- PRINT MODAL -->
+<div id="printModal" class="modal-overlay" style="display:none;">
+  <div id="printModalContent"></div>
+</div>
+
+<!-- REPORT MODAL -->
+<div id="reportModal" class="modal-overlay" style="display:none;">
+  <div class="modal" style="width:400px;">
+    <div class="modal-header">
+      <strong>📋 Generate Report</strong>
+      <button class="modal-close" onclick="closeModal('reportModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-info-text">Report bulanan akan dibuka di tab baru, siap dicetak sebagai PDF.</p>
+      <div class="form-group">
+        <label class="form-label">Bulan</label>
+        <select id="reportBulan" class="form-input">
+          <option value="1">Januari</option><option value="2">Februari</option>
+          <option value="3">Maret</option><option value="4">April</option>
+          <option value="5">Mei</option><option value="6">Juni</option>
+          <option value="7">Juli</option><option value="8">Agustus</option>
+          <option value="9">September</option><option value="10">Oktober</option>
+          <option value="11">November</option><option value="12">Desember</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Tahun</label>
+        <input type="number" id="reportTahun" value="2026" min="2020" max="2030" class="form-input"/>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" onclick="closeModal('reportModal')">Batal</button>
+      <button class="btn-primary" onclick="generateReport()">Generate PDF</button>
+    </div>
+  </div>
+</div>
+
+<!-- CUSTOMER DETAIL MODAL (Credit Scoring) -->
+<div id="custDetailModal" class="modal-overlay" style="display:none;">
+  <div id="custDetailContent" class="modal modal-wide"></div>
+</div>
+
+<!-- TOAST -->
+<!-- EXPORT MODAL -->
+<div id="exportModal" class="modal-overlay" style="display:none;">
+  <div id="exportModalInner"></div>
+</div>
+
+<div id="toast" role="alert" aria-live="polite"></div>
+
+<!-- FILE INPUT -->
+<input type="file" id="fileInput" multiple accept=".xls,.xlsx" style="display:none" onchange="handleFileUpload(event)"/>
+
+<!-- ===================== SCRIPTS ===================== -->
+<script src="js/constants.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/scoring.js"></script>
+<script src="api.js"></script>
+<script src="js/app.js"></script>
+<script src="js/render/exec.js"></script>
+<script src="js/render/artracker.js"></script>
+<script src="js/render/credit.js"></script>
+<script src="js/render/settings.js"></script>
+<script src="js/modals/invoice.js"></script>
+<script src="js/modals/bulk.js"></script>
+<script src="js/modals/report.js"></script>
+<script src="js/modals/export.js"></script>
+
+<script>
+  // Boot
+  appInit().catch(e => console.error("Init error:", e));
+</script>
+</body>
+</html>
