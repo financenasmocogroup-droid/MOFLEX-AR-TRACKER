@@ -37,6 +37,10 @@
         <span>Credit Scoring</span>
       </a>
       <div class="nav-divider"></div>
+      <a class="nav-item" id="nav-users" href="#" onclick="navigateTo('users');return false;">
+        <i class="nav-icon">👥</i>
+        <span>User &amp; Role</span>
+      </a>
       <a class="nav-item" id="nav-settings" href="#" onclick="navigateTo('settings');return false;">
         <i class="nav-icon">⚙️</i>
         <span>Settings</span>
@@ -134,6 +138,11 @@
         <div id="credit-tab-dashboard"><div id="creditDashContent"></div></div>
         <div id="credit-tab-customers" style="display:none;"><div id="creditCustContent"></div></div>
         <div id="credit-tab-input" style="display:none;"><div id="creditInputContent"></div></div>
+      </div>
+
+      <!-- USER & ROLE -->
+      <div class="page" id="page-users" style="display:none;">
+        <div id="usersContent"></div>
       </div>
 
       <!-- SETTINGS -->
