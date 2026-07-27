@@ -108,6 +108,7 @@ const LS_SETTINGS_V2    = "moflex_settings_v1";
 const LS_MAPPING_V2     = "moflex_customer_mapping_v1";
 const LS_CUST_TYPE_V2   = "moflex_cust_type_keywords_v1";
 const LS_SCORING_V2     = "moflex_scoring_settings_v1";
+const LS_SUBTIPE_KW_V1  = "moflex_subtipe_keywords_v1";
 
 const DEALER_LIST = [
   "Nasmoco Bantul","Nasmoco Brebes","Nasmoco Cilacap","Nasmoco Demak","Nasmoco Gombel",
