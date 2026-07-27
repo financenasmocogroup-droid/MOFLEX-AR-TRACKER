@@ -30,7 +30,33 @@ function selectInv(id) {
   });
 }
 
-function switchDetailTab(t) { APP_STATE.detailTab = t; renderMonitoring(); }
+function switchDetailTab(t) {
+  APP_STATE.detailTab = t;
+  if(t === "history" && APP_STATE.selectedId) {
+    const id = APP_STATE.selectedId;
+    // Selalu fetch ulang tiap tab dibuka biar dapet data paling baru (bukan cache basi)
+    APP_STATE.historyCache[id] = { loading: true, items: [] };
+    Api.getHistory(id).then(items => {
+      APP_STATE.historyCache[id] = { loading: false, items };
+      if(APP_STATE.selectedId === id && APP_STATE.detailTab === "history") renderMonitoring();
+    }).catch(() => {
+      APP_STATE.historyCache[id] = { loading: false, items: [], error: true };
+      if(APP_STATE.selectedId === id && APP_STATE.detailTab === "history") renderMonitoring();
+    });
+  }
+  if(t === "followup" && APP_STATE.selectedId) {
+    const id = APP_STATE.selectedId;
+    APP_STATE.followUpCache[id] = { loading: true, items: [] };
+    Api.getFollowUps(id).then(items => {
+      APP_STATE.followUpCache[id] = { loading: false, items };
+      if(APP_STATE.selectedId === id && APP_STATE.detailTab === "followup") renderMonitoring();
+    }).catch(() => {
+      APP_STATE.followUpCache[id] = { loading: false, items: [], error: true };
+      if(APP_STATE.selectedId === id && APP_STATE.detailTab === "followup") renderMonitoring();
+    });
+  }
+  renderMonitoring();
+}
 
 function toggleSelectAll(checked) {
   const f = getFiltered();
@@ -80,7 +106,7 @@ function doNext(id, nextStage) {
   toast(`✓ Lanjut ke ${nextStage}`, "success");
 }
 
-function submitFU(id) {
+async function submitFU(id) {
   const tgl        = document.getElementById("fuTgl")?.value || today();
   const status     = document.getElementById("fuStatus")?.value || "Sudah FU";
   const alasan     = document.getElementById("fuAlasanCustom")?.value || document.getElementById("fuAlasan")?.value || "";
@@ -88,7 +114,7 @@ function submitFU(id) {
   const promiseToPay = document.getElementById("fuPromise")?.value || "";
   const problemId    = document.getElementById("fuProblemId")?.value || "";
   const promiseMining = document.getElementById("fuPromiseMining")?.value || "";
-  addFollowUp(id, {tgl, status, alasan, remarks, promiseToPay});
+  await addFollowUp(id, {tgl, status, alasan, remarks, promiseToPay});
   // Sync enrichment fields to invoice level
   if(problemId)    { saveEnrichmentField(id, "problemId", problemId); invalidateCreditCache(); }
   if(remarks)        saveEnrichmentField(id, "lastRemark", remarks);
@@ -148,7 +174,7 @@ function renderARDashboard() {
     let extra = "";
     if(s==="Cek Kelengkapan"&&list.length>0){ const avg=list.reduce((sum,i)=>sum+docPct(i).pct,0)/list.length; extra=`<div style="font-size:10px;color:#d97706;margin-top:2px;">Dok: ${avg.toFixed(0)}%</div>`; }
     if(s==="Plan & Kirim"&&list.length>0){ const sp=list.filter(i=>i.planKirim).length; extra=`<div style="font-size:10px;color:#2563eb;margin-top:2px;">Plan: ${sp}/${list.length}</div>`; }
-    if(s==="Follow Up"&&list.length>0){ const cleared=list.filter(i=>i.fuCleared).length; const wp=list.filter(i=>(i.followUps||[]).some(f=>f.promiseToPay)).length; extra=`<div style="font-size:10px;color:#7c3aed;margin-top:2px;">Clear: ${cleared}/${list.length} · Promise: ${wp}</div>`; }
+    if(s==="Follow Up"&&list.length>0){ const cleared=list.filter(i=>i.fuCleared).length; const wp=list.filter(i=>i.hasPromiseFollowUp).length; extra=`<div style="font-size:10px;color:#7c3aed;margin-top:2px;">Clear: ${cleared}/${list.length} · Promise: ${wp}</div>`; }
     return {s, list, nominal, extra};
   });
 
@@ -337,8 +363,6 @@ function renderMonitoring() {
                 <tbody>
                   ${filtered.slice(0,500).map(i => {
                     const {done,total:dtotal,pct} = docPct(i);
-                    const fuList = i.followUps || [];
-                    const promises = fuList.filter(f => f.promiseToPay);
                     let stageInfo = "";
                     if(i.stage==="Cek Kelengkapan"){
                       const c = pct===100?"#16a34a":pct>=50?"#d97706":"#dc2626";
@@ -350,8 +374,8 @@ function renderMonitoring() {
                     } else if(i.stage==="Follow Up"){
                       stageInfo = `
                         <div>
-                          <span style="font-size:11px;color:${i.fuCleared?"#16a34a":"#d97706"};font-weight:500;">${i.fuCleared?"✓ Cleared":"FU #"+fuList.length}</span>
-                          ${promises.length>0?`<br><span style="font-size:10px;color:#7c3aed;">Promise: ${fmtDate(promises[promises.length-1].promiseToPay)}</span>`:""}
+                          <span style="font-size:11px;color:${i.fuCleared?"#16a34a":"#d97706"};font-weight:500;">${i.fuCleared?"✓ Cleared":"FU #"+(i.followUpCount||0)}</span>
+                          ${i.lastPromiseToPay?`<br><span style="font-size:10px;color:#7c3aed;">Promise: ${fmtDate(i.lastPromiseToPay)}</span>`:""}
                         </div>`;
                     } else if(i.stage==="Lunas"){
                       const kurang = (i.nominalDiterima||0) < i.total && i.total > 0;
@@ -402,7 +426,10 @@ function renderDetailPanel(inv) {
   const curIdx = STAGES.indexOf(inv.stage);
   const nextStage = STAGES[curIdx+1] || null;
   const {done:docsDone, total:docsTotal, pct:docsPct, docs:docsList} = docPct(inv);
-  const fuList = inv.followUps || [];
+  const fuCache   = APP_STATE.followUpCache[inv.id];
+  const fuLoading = !fuCache || fuCache.loading;
+  const fuError   = fuCache && fuCache.error;
+  const fuList = (fuCache && !fuCache.loading && !fuCache.error) ? fuCache.items : [];
   const promises = fuList.filter(f => f.promiseToPay);
   let content = "";
 
@@ -425,7 +452,7 @@ function renderDetailPanel(inv) {
         ${inv.sbr!=="BP"?`
           <div style="border-top:0.5px solid var(--border);padding-top:10px;">
             <label class="form-label">Sub-tipe</label>
-            <select class="form-input" onchange="updateInvoice('${inv.id}',{subTipe:this.value,dokumen:{}});renderMonitoring();">
+            <select class="form-input" onchange="updateInvoice('${inv.id}',{subTipe:this.value,subTipeManual:true,dokumen:{}});renderMonitoring();">
               ${(SUBTIPE[inv.sbr]||[]).map(s=>`<option ${inv.subTipe===s?"selected":""}>${s}</option>`).join("")}
             </select>
           </div>`:""}
@@ -581,7 +608,7 @@ function renderDetailPanel(inv) {
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <div>
               <p style="font-weight:600;font-size:12px;color:${cleared?"#16a34a":"#d97706"};">${cleared?"✓ Follow Up Cleared":"Dalam Proses Follow Up"}</p>
-              <p style="font-size:11px;color:var(--gray-400);margin-top:1px;">${fuList.length} FU · ${promises.length} Promise</p>
+              <p style="font-size:11px;color:var(--gray-400);margin-top:1px;">${inv.followUpCount||0} FU${fuLoading?" · memuat detail...":` · ${promises.length} Promise`}</p>
             </div>
             ${cleared?`
               <button onclick="updateInvoice('${inv.id}',{fuCleared:false});addHistory('${inv.id}','FU Clear dibatalkan');renderMonitoring();"
@@ -620,7 +647,11 @@ function renderDetailPanel(inv) {
             <button class="btn-primary" onclick="submitFU('${inv.id}')" style="padding:8px;">Simpan Follow Up</button>
           </div>
         </div>
-        ${fuList.length>0?`
+        ${fuLoading?`
+          <div style="text-align:center;padding:20px;color:var(--gray-400);font-size:12px;">Memuat riwayat follow up...</div>`
+        : fuError?`
+          <div style="text-align:center;padding:20px;color:var(--red);font-size:12px;">Gagal memuat riwayat dari server.</div>`
+        : fuList.length>0?`
           <div>
             <p style="font-size:12px;font-weight:600;margin-bottom:8px;">Riwayat (${fuList.length})</p>
             ${[...fuList].reverse().map((fu,i)=>{
@@ -665,14 +696,23 @@ function renderDetailPanel(inv) {
   }
 
   else if(APP_STATE.detailTab === "history") {
-    content = `
-      <div style="display:flex;flex-direction:column;gap:10px;">
-        ${[...(inv.history||[])].reverse().map(h=>`
-          <div style="display:flex;gap:10px;font-size:12px;">
-            <div style="width:6px;height:6px;border-radius:50%;background:var(--blue);margin-top:4px;flex-shrink:0;"></div>
-            <div><p style="font-weight:500;">${h.aksi}</p><p style="font-size:10px;color:var(--gray-400);margin-top:1px;">${fmtDateTime(h.tgl)} · ${h.user}</p></div>
-          </div>`).join("")}
-      </div>`;
+    const hc = APP_STATE.historyCache[inv.id];
+    if(!hc || hc.loading) {
+      content = `<div style="text-align:center;padding:24px;color:var(--gray-400);font-size:12px;">Memuat history...</div>`;
+    } else if(hc.error) {
+      content = `<div style="text-align:center;padding:24px;color:var(--red);font-size:12px;">Gagal memuat history dari server.</div>`;
+    } else if(!hc.items.length) {
+      content = `<div style="text-align:center;padding:24px;color:var(--gray-400);font-size:12px;">Belum ada history.</div>`;
+    } else {
+      content = `
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          ${[...hc.items].reverse().map(h=>`
+            <div style="display:flex;gap:10px;font-size:12px;">
+              <div style="width:6px;height:6px;border-radius:50%;background:var(--blue);margin-top:4px;flex-shrink:0;"></div>
+              <div><p style="font-weight:500;">${h.aksi}</p><p style="font-size:10px;color:var(--gray-400);margin-top:1px;">${fmtDateTime(h.tgl)} · ${h.user}</p></div>
+            </div>`).join("")}
+        </div>`;
+    }
   }
 
   const showPlanKirim = ["Plan & Kirim","Follow Up","Lunas"].includes(inv.stage);
@@ -680,7 +720,7 @@ function renderDetailPanel(inv) {
     {key:"detail",   label:"Detail"},
     {key:"dokumen",  label:`Dok ${docsDone}/${docsTotal}`, warn:docsPct<100&&inv.stage!=="AR Masuk"},
     ...(showPlanKirim?[{key:"plankirim",label:"Kirim"}]:[]),
-    ...(["Follow Up","Lunas"].includes(inv.stage)?[{key:"followup",label:`FU${fuList.length>0?" ("+fuList.length+")":""}`}]:[]),
+    ...(["Follow Up","Lunas"].includes(inv.stage)?[{key:"followup",label:`FU${inv.followUpCount>0?" ("+inv.followUpCount+")":""}`}]:[]),
     {key:"adjustspk",label:"Adj.SPK"},
     {key:"history",  label:"History"},
   ];
