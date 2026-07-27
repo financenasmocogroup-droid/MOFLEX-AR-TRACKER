@@ -9,7 +9,11 @@ function renderExec() {
   const totalSelisih    = kurangBayarList.reduce((s,i) => s + (i.total - (i.nominalDiterima||0)), 0);
   const totalBelumLunas = invoices.filter(i => i.stage !== "Lunas").reduce((s,i) => s + i.total, 0);
   const totalAR         = totalBelumLunas + totalSelisih;
-  const stuckList       = invoices.filter(i => isStuck(i));
+  const stuckList        = invoices.filter(i => isStuck(i));
+  // FIXED: sebelumnya card "Total Overdue/Stuck" salah pakai totalBelumLunas (= total
+  // SEMUA invoice belum lunas, sama persis kayak card "Total Piutang (AR)"), bukan
+  // nominal invoice yang beneran stuck doang.
+  const totalStuckNominal = stuckList.reduce((s,i) => s + i.total, 0);
 
   // Credit summary
   const creditSum = invoices.length > 0 ? getCreditSummary() : null;
@@ -48,7 +52,7 @@ function renderExec() {
       </div>
       <div class="metric-card ac-red" onclick="jumpToAlert()">
         <div class="metric-label">Total Overdue / Stuck</div>
-        <div class="metric-value">${fmtRpShort(totalBelumLunas)}</div>
+        <div class="metric-value">${fmtRpShort(totalStuckNominal)}</div>
         <div class="metric-sub">${stuckList.length} invoice perlu perhatian</div>
       </div>
       <div class="metric-card ac-teal" onclick="navigateTo('credit')">
@@ -129,14 +133,13 @@ function renderExec() {
               }).join("")}
             </div>
           </div>
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;border-top:0.5px solid var(--border);padding-top:10px;">
-            ${["Low Risk","Watch","Critical"].map(l => {
-              const d = creditSum.dist[l] || {};
-              const cat = RISK_CATEGORIES.find(c=>c.label===l);
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;border-top:0.5px solid var(--border);padding-top:10px;">
+            ${RISK_CATEGORIES.map(cat => {
+              const d = creditSum.dist[cat.label] || {};
               return `
                 <div style="text-align:center;">
-                  <div style="font-size:15px;font-weight:600;color:${cat?.color};">${d.count||0}</div>
-                  <div style="font-size:10px;color:var(--gray-400);">${l}</div>
+                  <div style="font-size:15px;font-weight:600;color:${cat.color};">${d.count||0}</div>
+                  <div style="font-size:10px;color:var(--gray-400);">${cat.label}</div>
                 </div>`;
             }).join("")}
           </div>` : `
