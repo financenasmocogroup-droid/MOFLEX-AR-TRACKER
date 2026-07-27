@@ -23,6 +23,57 @@ const DEFAULT_CUST_TYPE_KEYWORDS = {
 
 let custTypeKeywords = {...DEFAULT_CUST_TYPE_KEYWORDS};
 
+// ===== SUB-TIPE KEYWORDS (Opsi A — terpisah dari custType di atas) =====
+// custType (di atas) dipake buat Credit Scoring, lintas semua divisi.
+// subTipeKeywords ini KHUSUS buat nentuin subTipe invoice (Leasing/Cash utk Mobil,
+// Fleet/NRM utk GRP) — yang muncul di badge "Mobil — Cash" dan nentuin checklist
+// dokumen. Dua sistem ini sengaja dipisah, gak saling nimpa.
+const EMPTY_SUBTIPE_KEYWORDS = {
+  Mobil: { Leasing: [], Cash: [] },
+  GRP:   { Fleet: [],   NRM: [] },
+};
+let subTipeKeywords = null; // di-init di loadSubTipeKeywords() — null = belum di-load
+
+function loadSubTipeKeywords() {
+  try {
+    const r = localStorage.getItem(LS_SUBTIPE_KW_V1);
+    if(r) {
+      subTipeKeywords = JSON.parse(r);
+      return;
+    }
+  } catch {}
+  // First-run seed: copy keyword Leasing & Fleet yang UDAH ADA di custType keyword
+  // (termasuk yang udah pernah diedit user, misal nambahin nama leasing tertentu)
+  // biar gak mulai dari nol. Cash & NRM sengaja mulai kosong (gak ada padanan lama).
+  subTipeKeywords = {
+    Mobil: { Leasing: [...(custTypeKeywords.Leasing||[])], Cash: [] },
+    GRP:   { Fleet:   [...(custTypeKeywords.Fleet||[])],   NRM: [] },
+  };
+}
+
+function saveSubTipeKeywordsLocal(kw) {
+  subTipeKeywords = {
+    Mobil: { Leasing: kw?.Mobil?.Leasing||[], Cash: kw?.Mobil?.Cash||[] },
+    GRP:   { Fleet:   kw?.GRP?.Fleet||[],     NRM:   kw?.GRP?.NRM||[] },
+  };
+  localStorage.setItem(LS_SUBTIPE_KW_V1, JSON.stringify(subTipeKeywords));
+}
+
+// Deteksi subTipe berdasar nama customer. BP gak punya subTipe -> selalu "".
+// Mobil: cek keyword Leasing dulu, fallback Cash. GRP: cek keyword Fleet dulu, fallback NRM.
+function detectSubTipe(divisi, namaCust) {
+  if(divisi !== "Mobil" && divisi !== "GRP") return "";
+  const groups = (subTipeKeywords || EMPTY_SUBTIPE_KEYWORDS)[divisi];
+  const primary  = divisi === "Mobil" ? "Leasing" : "Fleet";
+  const fallback = divisi === "Mobil" ? "Cash"    : "NRM";
+  const upper = (namaCust||"").toUpperCase();
+  const kwPrimary = groups?.[primary] || [];
+  if(kwPrimary.some(kw => kw && upper.includes(kw.toUpperCase()))) return primary;
+  const kwFallback = groups?.[fallback] || [];
+  if(kwFallback.some(kw => kw && upper.includes(kw.toUpperCase()))) return fallback;
+  return fallback; // default kalau gak match keyword manapun
+}
+
 // ===== SETTINGS =====
 function loadScoringSettings() {
   try {
