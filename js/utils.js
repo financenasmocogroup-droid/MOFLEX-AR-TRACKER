@@ -17,6 +17,25 @@ const fmtRpShort = n => {
 };
 const parseF   = v => parseFloat(String(v||"0").replace(/[^0-9.-]/g,"")) || 0;
 
+// FIXED: field numerik invoice yang balik dari backend (Google Sheets) kadang bukan
+// angka murni (cell ke-edit manual langsung di spreadsheet, blank, dsb). Kalau
+// dibiarin, perbandingan >=/< di banyak tempat (Lunas Penuh, Kurang Bayar, dst)
+// diam-diam gagal karena NaN gak pernah lebih besar/kecil dari apapun -- invoice-nya
+// jadi "hilang" dari kedua kategori tanpa error apapun. Dibersihin sekali di sini,
+// begitu data invoice pertama kali masuk dari backend, biar semua kalkulasi di
+// hilir (exec summary, AR dashboard, credit scoring, dll) aman.
+const NUMERIC_INVOICE_FIELDS = [
+  "total","lancar","aging1_30","aging31_60","aging61_90","aging91_120",
+  "aging121_150","agingOver150","nominalDiterima","selisih","subsequent","followUpCount",
+];
+function sanitizeInvoiceNumbers(list) {
+  return (list||[]).map(inv => {
+    const clean = {...inv};
+    NUMERIC_INVOICE_FIELDS.forEach(f => { clean[f] = parseF(clean[f]); });
+    return clean;
+  });
+}
+
 // ===== STUCK DETECTION =====
 const isStuck = inv => {
   if(inv.stage === "Lunas") return false;
@@ -113,18 +132,22 @@ function loadStorage() {
 }
 
 function updateInvoice(id, patch) {
+  let stageChanged = false, newStage = null;
   invoices = invoices.map(inv => {
     if(inv.id !== id) return inv;
     const updated = { ...inv, ...patch, updatedAt: today() };
     if(patch.stage && patch.stage !== inv.stage) {
       updated.stageUpdatedAt = today(); // tetap tanggal aja, dipakai buat hitung stuck days
-      updated.history = [...(inv.history||[]), {
-        tgl: nowTime(), aksi: `Stage → ${patch.stage}`, user: APP_STATE.user?.nama || "User"
-      }];
+      stageChanged = true; newStage = patch.stage;
     }
     return updated;
   });
   saveStorage();
+
+  // History disimpen ke backend lewat addHistory() — sebelumnya perubahan stage cuma
+  // ditulis ke state lokal (invoice.history[]) dan gak pernah kekirim ke server sama
+  // sekali. Sekarang manggil addHistory() biar konsisten sama aksi lain (FU, enrichment, dll).
+  if(stageChanged) addHistory(id, `Stage → ${newStage}`);
 
   // Sync ke backend
  const inv = getInv(id);
@@ -135,46 +158,60 @@ if(inv && Api.isLoggedIn()) {
 
 function getInv(id) { return invoices.find(i => i.id === id); }
 
-// FIXED: sekarang nulis dua tempat — embedded di invoice.history[] (lokal + upsertInvoice)
-// DAN ke sheet History standalone lewat Api.logHistory (sebelumnya orphan, gak pernah kepanggil)
+// History sekarang murni disimpen di sheet History lewat Api.logHistory — gak lagi
+// nempel di invoice.history[] lokal. Tab History di detail invoice narik langsung dari
+// backend (Api.getHistory) tiap dibuka, jadi semua user liat riwayat yang sama.
 function addHistory(id, aksi) {
-  const entry = { tgl: nowTime(), aksi, user: APP_STATE.user?.nama || "User" };
-
-  invoices = invoices.map(inv => {
-    if(inv.id !== id) return inv;
-    return { ...inv, history: [...(inv.history||[]), entry] };
-  });
-  saveStorage();
-
   if(Api.isLoggedIn()) {
     Api.logHistory(id, aksi).catch(e => console.warn("History sync error:", e));
   }
 }
 
 // ===== FOLLOW UP HELPERS =====
-function addFollowUp(id, data) {
+// FIXED: sebelumnya ngitung promiseNo/followUpCount dari inv.followUps[] lokal yang
+// di-embed penuh dari bulk fetch (salah satu penyebab payload getInvoices gede).
+// Sekarang array itu gak di-embed lagi -- angka promiseNo/followUpCount yang bener
+// dihitung DI SERVER (karena server tetep punya akses ke seluruh riwayat FU invoice
+// ini) dan dikirim balik di response. Makanya fungsi ini jadi async, nunggu balesan
+// server dulu baru update tampilan/history.
+async function addFollowUp(id, data) {
   const inv = getInv(id);
-  const existing = inv.followUps || [];
-  const promiseNo = existing.filter(f => f.promiseToPay).length + (data.promiseToPay ? 1 : 0);
-  const entry = {
-    ...data,
-    tgl: data.tgl || today(),
-    promiseNo: data.promiseToPay ? promiseNo : null,
-  };
+  const entry = { ...data, tgl: data.tgl || today() };
 
-  // Update local state dulu biar UI responsif
+  if(!Api.isLoggedIn()) {
+    toast("Follow Up butuh koneksi ke server (belum login)", "error");
+    return;
+  }
+
+  let res;
+  try {
+    res = await Api.addFollowUp({ invoiceId: id, ...entry });
+  } catch(e) {
+    console.warn("FU sync error:", e);
+    toast("Gagal menyimpan Follow Up ke server", "error");
+    return;
+  }
+  entry.promiseNo = res.promiseNo;
+
+  // Update local state pakai angka yang udah dipastiin server
   invoices = invoices.map(i => {
     if(i.id !== id) return i;
-    return { ...i, followUps: [...existing, entry], lastFU: today(), fuCleared: false };
+    return {
+      ...i,
+      followUpCount: res.followUpCount,
+      hasPromiseFollowUp: i.hasPromiseFollowUp || !!data.promiseToPay,
+      lastPromiseToPay: data.promiseToPay || i.lastPromiseToPay,
+      lastFU: today(), fuCleared: false,
+    };
   });
   saveStorage();
 
-  // Sync ke backend — insert ke sheet FollowUps
-  if(Api.isLoggedIn()) {
-    Api.addFollowUp({ invoiceId: id, ...entry }).catch(e => console.warn("FU sync error:", e));
-  }
+  // Kalau tab Follow Up invoice ini lagi kebuka, langsung nempelin entry baru ke
+  // cache-nya (biar keliatan instan, gak perlu nunggu fetch ulang)
+  const fc = APP_STATE.followUpCache[id];
+  if(fc && !fc.loading) fc.items = [...fc.items, entry];
 
-  addHistory(id, `Follow Up #${existing.length+1}${data.promiseToPay ? ` — Promise #${promiseNo} (${fmtDate(data.promiseToPay)})` : ""}`);
+  addHistory(id, `Follow Up #${res.followUpCount}${data.promiseToPay ? ` — Promise #${res.promiseNo} (${fmtDate(data.promiseToPay)})` : ""}`);
 }
 
 function clearFollowUp(id) {
@@ -237,8 +274,10 @@ function parseRows(rows, filename) {
 
     const sbrVal  = String(col(row,"Sbr")||"").trim();
     const divisi  = detectDivisi(filename, noInv, sbrVal);
-    const defaultSubTipe = divisi === "GRP" ? "Fleet" : divisi === "Mobil" ? "Cash" : "";
     const namaCust = String(col(row,"Nama Costumer","Nama Customer")||"");
+    // FIXED: sebelumnya hardcode Cash/Fleet doang, gak pernah baca keyword sama
+    // sekali. Sekarang pake detectSubTipe() (keyword per-divisi di Settings).
+    const defaultSubTipe = detectSubTipe(divisi, namaCust);
 
     result.push({
       // Identity
@@ -295,13 +334,12 @@ function parseRows(rows, filename) {
 
       // Follow up
       catatanKendala: "",
-      followUps: [], lastFU: "", fuCleared: false,
+      followUpCount: 0, hasPromiseFollowUp: false, lastPromiseToPay: "", lastFU: "", fuCleared: false,
 
       // Meta
       adjustSPK: [], isManual: false, cetakHistory: [],
       createdAt: today(), updatedAt: today(),
       createdBy: APP_STATE.user?.nama || "System",
-      history: [{ tgl: nowTime(), aksi: "Import dari XLS", user: "System" }],
     });
   }
   return result;
@@ -328,6 +366,12 @@ async function handleFileUpload(e) {
   const files = Array.from(e.target.files);
   if(!files.length) return;
   let totalAdded = 0, totalUpdated = 0;
+  // FIXED: sebelumnya sync ngirim SELURUH array `invoices` (bisa puluhan ribu,
+  // termasuk yang gak ikut kesentuh sama sekali di upload ini) ke
+  // batchUpsertInvoices() -- payload gede & bikin backend kerja jauh lebih berat
+  // dari yang perlu. Sekarang cuma invoice yang beneran baru/berubah di batch ini
+  // yang dikirim.
+  const touched = [];
 
   for(const file of files) {
     try {
@@ -342,7 +386,7 @@ async function handleFileUpload(e) {
         if(map.has(inv.noInvoice)) {
           const ex = map.get(inv.noInvoice);
           // Update financial fields but preserve pipeline progress & enrichment
-          map.set(inv.noInvoice, { ...ex,
+          const merged = { ...ex,
             total: inv.total, jthTempo: inv.jthTempo,
             lancar: inv.lancar, aging1_30: inv.aging1_30,
             aging31_60: inv.aging31_60, aging61_90: inv.aging61_90,
@@ -352,10 +396,13 @@ async function handleFileUpload(e) {
             salesSA: inv.salesSA, noWO: inv.noWO,
             masterName: getMasterName(inv.namaCust),
             updatedAt: today(),
-          });
+          };
+          map.set(inv.noInvoice, merged);
+          touched.push(merged);
           updated++;
         } else {
           map.set(inv.noInvoice, inv);
+          touched.push(inv);
           added++;
         }
       }
@@ -368,13 +415,18 @@ async function handleFileUpload(e) {
  saveStorage();
   e.target.value = "";
   toast(`Import selesai: +${totalAdded} baru, ~${totalUpdated} diperbarui`, "success");
-  // Sync semua ke backend sekaligus
-  if(Api.isLoggedIn()) {
-    showApiLoader("Mengirim ke server...");
-    Api.batchUpsertInvoices(invoices)
+  // Sync cuma yang berubah/baru ke backend
+  if(Api.isLoggedIn() && touched.length > 0) {
+    showApiLoader(`Mengirim ${touched.length} invoice ke server...`);
+    Api.batchUpsertInvoices(touched)
       .then(r => {
         hideApiLoader();
         toast(`Sync selesai: +${r.added} baru, ~${r.updated} diperbarui`, "success");
+        // Cuma 1 baris ringkasan ke History, bukan per-invoice (biar gak numpuk
+        // ribuan entry tiap upload) — mirip pola logAutoImport_ di EmailIngestion.gs
+        const fileNames = files.map(f => f.name).join(", ");
+        Api.logHistory("SYSTEM", `Upload XLS manual (${fileNames}): +${r.added} baru, ~${r.updated} diperbarui`)
+          .catch(e => console.warn("History sync error:", e));
         renderCurrentPage();
       })
       .catch(e => {
@@ -384,6 +436,44 @@ async function handleFileUpload(e) {
   } else {
     renderCurrentPage();
   }
+}
+
+// ===== RE-RUN AUTO-DETECT SUB-TIPE (dipanggil dari tombol di Settings) =====
+// Cuma nyentuh invoice yang subTipe-nya BELUM pernah di-edit manual (subTipeManual
+// falsy) — biar gak nimpa koreksi manual yang udah bener. Kirim cuma yang beneran
+// berubah ke backend (bukan semua invoice), biar ringan.
+async function recalculateAllSubTipe() {
+  const changed = [];
+  invoices = invoices.map(inv => {
+    if(inv.sbr !== "Mobil" && inv.sbr !== "GRP") return inv;
+    if(inv.subTipeManual) return inv;
+    const detected = detectSubTipe(inv.sbr, inv.namaCust);
+    if(detected === inv.subTipe) return inv;
+    const updated = { ...inv, subTipe: detected, updatedAt: today() };
+    changed.push(updated);
+    return updated;
+  });
+  saveStorage();
+
+  if(!changed.length) { toast("Tidak ada invoice yang perlu diperbarui.", ""); return; }
+
+  if(Api.isLoggedIn()) {
+    showApiLoader(`Sync ${changed.length} invoice...`);
+    try {
+      await Api.batchUpsertInvoices(changed);
+      hideApiLoader();
+      toast(`Auto-detect selesai: ${changed.length} invoice diperbarui`, "success");
+      Api.logHistory("SYSTEM", `Re-run Keyword Auto-Detect Sub-Tipe: ${changed.length} invoice diperbarui`)
+        .catch(e => console.warn("History sync error:", e));
+    } catch(e) {
+      hideApiLoader();
+      console.warn("Sync error:", e);
+      toast(`Update lokal berhasil (${changed.length} invoice), tapi gagal sync ke server`, "error");
+    }
+  } else {
+    toast(`Auto-detect selesai (lokal): ${changed.length} invoice diperbarui`, "success");
+  }
+  renderCurrentPage();
 }
 
 // ===== MODAL HELPER =====
