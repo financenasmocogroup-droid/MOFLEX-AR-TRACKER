@@ -26,6 +26,7 @@ function getFilteredCreditCustomers() {
     if(APP_STATE.creditArchiveView) { if(c.totalOutstanding > 0) return false; }
     else { if(c.totalOutstanding === 0) return false; }
     if(APP_STATE.creditFilterTier && APP_STATE.creditFilterTier !== "Semua" && c.score.category.label !== APP_STATE.creditFilterTier) return false;
+    if(APP_STATE.creditFilterType && c.custType !== APP_STATE.creditFilterType) return false;
     if(APP_STATE.creditSearchQ && !c.masterName.toLowerCase().includes(APP_STATE.creditSearchQ.toLowerCase())) return false;
     return true;
   });
