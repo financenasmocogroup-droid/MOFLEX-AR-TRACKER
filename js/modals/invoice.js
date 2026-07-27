@@ -18,7 +18,9 @@ function updateSubTipeOptions(divisi) {
   const opts = SUBTIPE[divisi] || [];
   if(!opts.length || opts[0] === "") { container.style.display = "none"; return; }
   container.style.display = "";
-  sel.innerHTML = opts.map(o => `<option>${o}</option>`).join("");
+  const namaCust = document.getElementById("af_namaCust")?.value || "";
+  const detected = detectSubTipe(divisi, namaCust); // pre-select saran auto-detect, tetep bisa diubah manual
+  sel.innerHTML = opts.map(o => `<option ${o===detected?"selected":""}>${o}</option>`).join("");
 }
 
 function openAddModal() {
@@ -58,7 +60,7 @@ function submitAddForm() {
     tglJual: get("tglJual") || today(), jthTempo: get("jthTempo") || today(),
     total: parseFloat(get("total")) || 0,
     lancar:0, aging1_30:0, aging31_60:0, aging61_90:0, aging91_120:0, aging121_150:0, agingOver150:0,
-    sbr: divisi, subTipe,
+    sbr: divisi, subTipe, subTipeManual: !!subTipe, // dipilih manual di form -> exempt dari auto-recalculate nanti
     noWO: get("noWO"), noPol: get("noPol"), noSPK: get("noSPK"),
     salesSA: get("salesSA"), keterangan: get("keterangan"),
     stage: "AR Masuk", stageUpdatedAt: today(), tglMasuk: today(),
@@ -66,10 +68,9 @@ function submitAddForm() {
     tglLunas: "", nominalDiterima: 0, selisih: 0, keteranganLunas: "", keteranganLunasCustom: "",
     problemId: "", lastRemark: "", pdcaRemark: "", updateRemarks: "",
     isBukpot: "", pph23: "", isRetur: "", promiseToPay: "", promiseMining: "", subsequent: 0,
-    catatanKendala: "", followUps: [], lastFU: "", fuCleared: false,
+    catatanKendala: "", followUpCount: 0, hasPromiseFollowUp: false, lastPromiseToPay: "", lastFU: "", fuCleared: false,
     adjustSPK: [], isManual: true, cetakHistory: [],
     createdAt: today(), updatedAt: today(), createdBy: APP_STATE.user?.nama || "User",
-    history: [{tgl: nowTime(), aksi: "Input manual", user: APP_STATE.user?.nama || "User"}],
   };
 
   invoices = [newInv, ...invoices];
@@ -88,6 +89,7 @@ function submitAddForm() {
       console.warn("Sync error (manual invoice):", e);
       toast("Invoice tersimpan lokal, tapi gagal sync ke server", "error");
     });
+    addHistory(newInv.id, "Input manual");
   }
 }
 
