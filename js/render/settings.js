@@ -1,7 +1,40 @@
+// ===== USER & ROLE MANAGEMENT PAGE (dipisah dari Settings) =====
+function renderUsers() {
+  const el = document.getElementById("usersContent");
+  if(!el) return;
+
+  if(APP_STATE.user?.role !== "head") {
+    el.innerHTML = `<div class="empty-state"><div class="empty-state-text">🔒 Hanya SuperAdmin (head) yang bisa akses halaman ini.</div></div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="page-header">
+      <div class="page-header-left">
+        <div class="page-title">User & Role Management</div>
+        <div class="page-subtitle">SuperAdmin bisa akses semua divisi. Admin BP/GRP/Sales hanya melihat & mengelola invoice divisinya sendiri.</div>
+      </div>
+    </div>
+    <div style="max-width:780px;">
+      <div class="card">
+        <div class="sec-hdr">
+          <span class="sec-title">👥 Daftar User</span>
+          <button class="btn-sm" onclick="openUserModal()">+ Tambah User</button>
+        </div>
+        <div id="usersListWrap">
+          <div class="empty-state"><div class="empty-state-text">Memuat data user...</div></div>
+        </div>
+      </div>
+    </div>
+  `;
+  loadUsersList();
+}
+
 // ===== SETTINGS PAGE =====
 function renderSettings() {
   const el = document.getElementById("settingsContent");
   if(!el) return;
+  const isHead = APP_STATE.user?.role === "head";
 
   el.innerHTML = `
     <div class="page-header">
@@ -13,22 +46,10 @@ function renderSettings() {
 
     <div style="max-width:780px;display:flex;flex-direction:column;gap:16px;">
 
-      ${APP_STATE.user?.role === "head" ? `
-      <!-- USER & ROLE MANAGEMENT -->
-      <div class="card">
-        <div class="sec-hdr">
-          <span class="sec-title">👥 User & Role Management</span>
-          <button class="btn-sm" onclick="openUserModal()">+ Tambah User</button>
-        </div>
-        <p style="font-size:12px;color:var(--gray-400);margin-bottom:14px;">SuperAdmin bisa akses semua divisi. Admin BP/GRP/Sales hanya melihat & mengelola invoice divisinya sendiri.</p>
-        <div id="usersListWrap">
-          <div class="empty-state"><div class="empty-state-text">Memuat data user...</div></div>
-        </div>
-      </div>` : ""}
-
       <!-- COMPANY MASTER -->
       <div class="card">
         <div class="sec-hdr"><span class="sec-title">🏢 Info Perusahaan</span></div>
+        ${!isHead?`<p style="font-size:11px;color:var(--gray-400);margin-bottom:10px;">🔒 Hanya SuperAdmin (head) yang bisa mengubah bagian ini — nilai di bawah berlaku untuk semua dealer.</p>`:""}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
           ${[
             ["Nama Perusahaan","master_perusahaan",MASTER.perusahaan,"text"],
@@ -46,7 +67,7 @@ function renderSettings() {
           ].map(([label,id,val]) => `
             <div class="form-group">
               <label class="form-label">${label}</label>
-              <input type="text" id="${id}" class="form-input" value="${val||""}"/>
+              <input type="text" id="${id}" class="form-input" value="${val||""}" ${!isHead?"disabled":""}/>
             </div>`).join("")}
         </div>
       </div>
@@ -56,7 +77,7 @@ function renderSettings() {
         <div class="sec-hdr">
           <span class="sec-title">⏱ Threshold Perlu Perhatian</span>
         </div>
-        <p style="font-size:12px;color:var(--gray-400);margin-bottom:14px;">Atur batas hari invoice dianggap stuck per stage</p>
+        <p style="font-size:12px;color:var(--gray-400);margin-bottom:14px;">Atur batas hari invoice dianggap stuck per stage${!isHead?" (🔒 hanya SuperAdmin yang bisa ubah)":""}</p>
         <div style="display:flex;flex-direction:column;gap:8px;">
           ${STAGES.filter(s=>s!=="Lunas").map(s => `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--gray-50);border-radius:var(--r-md);border:0.5px solid var(--border);">
@@ -66,7 +87,7 @@ function renderSettings() {
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
                 <input type="number" id="sd_${s.replace(/ /g,'_').replace(/&/g,'n')}" class="form-input"
-                  value="${STUCK_DAYS[s]||3}" min="1" max="90" style="width:70px;text-align:center;"/>
+                  value="${STUCK_DAYS[s]||3}" min="1" max="90" style="width:70px;text-align:center;" ${!isHead?"disabled":""}/>
                 <span style="font-size:12px;color:var(--gray-400);">hari</span>
               </div>
             </div>`).join("")}
@@ -76,16 +97,16 @@ function renderSettings() {
       <!-- DOCS CONFIG -->
       <div class="card">
         <div class="sec-hdr"><span class="sec-title">📋 Kelengkapan Dokumen per Divisi</span></div>
-        <p style="font-size:12px;color:var(--gray-400);margin-bottom:14px;">Centang dokumen yang wajib ada per divisi/sub-tipe</p>
+        <p style="font-size:12px;color:var(--gray-400);margin-bottom:14px;">Centang dokumen yang wajib ada per divisi/sub-tipe${!isHead?" (🔒 hanya SuperAdmin yang bisa ubah)":""}</p>
         <div style="display:flex;flex-direction:column;gap:16px;">
           ${Object.entries(DEFAULT_DOCS).map(([key, defaults]) => `
             <div>
               <p style="font-size:12px;font-weight:600;margin-bottom:8px;padding:5px 10px;background:var(--gray-100);border-radius:var(--r-sm);">${key.replace("-"," — ")}</p>
               <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:5px;">
                 ${DOCS_MASTER.map(doc => `
-                  <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;padding:5px 8px;border-radius:4px;background:${(DOCS_CONFIG[key]||defaults).includes(doc)?"var(--green-light)":"var(--gray-50)"};border:0.5px solid ${(DOCS_CONFIG[key]||defaults).includes(doc)?"#bbf7d0":"var(--border)"};">
+                  <label style="display:flex;align-items:center;gap:8px;font-size:12px;${isHead?"cursor:pointer;":"cursor:not-allowed;opacity:0.7;"}padding:5px 8px;border-radius:4px;background:${(DOCS_CONFIG[key]||defaults).includes(doc)?"var(--green-light)":"var(--gray-50)"};border:0.5px solid ${(DOCS_CONFIG[key]||defaults).includes(doc)?"#bbf7d0":"var(--border)"};">
                     <input type="checkbox" id="doc_${key.replace(/[ -]/g,'_')}_${doc.replace(/[^a-zA-Z0-9]/g,'_')}"
-                      ${(DOCS_CONFIG[key]||defaults).includes(doc)?"checked":""}/>
+                      ${(DOCS_CONFIG[key]||defaults).includes(doc)?"checked":""} ${!isHead?"disabled":""}/>
                     <span>${doc}</span>
                   </label>`).join("")}
               </div>
@@ -120,7 +141,7 @@ function renderSettings() {
       <!-- CUSTOMER TYPE KEYWORDS -->
       <div class="card">
         <div class="sec-hdr"><span class="sec-title">🏷 Keyword Auto-Detect Tipe Customer</span></div>
-        <p style="font-size:12px;color:var(--gray-400);margin-bottom:14px;">Pisahkan dengan koma. Urutan prioritas: Afiliasi → Asuransi → Leasing → Fleet → Personal</p>
+        <p style="font-size:12px;color:var(--gray-400);margin-bottom:14px;">Pisahkan dengan koma. Urutan prioritas: Afiliasi → Asuransi → Leasing → Fleet → Personal. Dipakai buat Credit Scoring.</p>
         <div style="display:flex;flex-direction:column;gap:10px;">
           ${["Afiliasi","Asuransi","Leasing","Fleet"].map(type => `
             <div class="form-group">
@@ -128,6 +149,39 @@ function renderSettings() {
               <textarea id="kw_${type}" class="form-input" rows="2" style="resize:vertical;">${(custTypeKeywords[type]||DEFAULT_CUST_TYPE_KEYWORDS[type]||[]).join(", ")}</textarea>
             </div>`).join("")}
         </div>
+      </div>
+
+      <!-- SUB-TIPE KEYWORDS (Opsi A — terpisah dari custType di atas) -->
+      <div class="card">
+        <div class="sec-hdr"><span class="sec-title">🔀 Keyword Auto-Detect Sub-Tipe (Mobil & GRP)</span></div>
+        <p style="font-size:12px;color:var(--gray-400);margin-bottom:6px;">Terpisah dari keyword Tipe Customer di atas. Ini yang nentuin badge "Leasing/Cash" & "Fleet/NRM" di detail invoice, sekaligus checklist dokumen yang berlaku. Pisahkan dengan koma.${!isHead?" 🔒 Hanya SuperAdmin (head) yang bisa ubah.":""}</p>
+        <div style="display:flex;flex-direction:column;gap:14px;margin-top:10px;">
+          <div>
+            <p style="font-size:12px;font-weight:600;margin-bottom:8px;padding:5px 10px;background:var(--gray-100);border-radius:var(--r-sm);">Divisi Mobil (fallback: Cash)</p>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              ${["Leasing","Cash"].map(t => `
+                <div class="form-group">
+                  <label class="form-label">${t}</label>
+                  <textarea id="subkw_Mobil_${t}" class="form-input" rows="2" style="resize:vertical;" ${!isHead?"disabled":""}>${(subTipeKeywords?.Mobil?.[t]||[]).join(", ")}</textarea>
+                </div>`).join("")}
+            </div>
+          </div>
+          <div>
+            <p style="font-size:12px;font-weight:600;margin-bottom:8px;padding:5px 10px;background:var(--gray-100);border-radius:var(--r-sm);">Divisi GRP (fallback: NRM)</p>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              ${["Fleet","NRM"].map(t => `
+                <div class="form-group">
+                  <label class="form-label">${t}</label>
+                  <textarea id="subkw_GRP_${t}" class="form-input" rows="2" style="resize:vertical;" ${!isHead?"disabled":""}>${(subTipeKeywords?.GRP?.[t]||[]).join(", ")}</textarea>
+                </div>`).join("")}
+            </div>
+          </div>
+        </div>
+        ${isHead?`
+          <div style="margin-top:14px;padding-top:14px;border-top:0.5px solid var(--border);">
+            <button class="btn-sm" onclick="runRecalculateSubTipe()">🔄 Jalankan Ulang Auto-Detect ke Semua Invoice</button>
+            <p style="font-size:11px;color:var(--gray-400);margin-top:6px;">Simpan keyword di atas dulu sebelum jalanin ini. Invoice yang sub-tipe-nya udah pernah diubah manual gak akan ketimpa.</p>
+          </div>`:""}
       </div>
 
       <!-- CUSTOMER MAPPING -->
@@ -159,7 +213,6 @@ function renderSettings() {
   `;
 
   updateWeightTotal();
-  if(APP_STATE.user?.role === "head") loadUsersList();
 }
 
 // ===== USER & ROLE MANAGEMENT =====
@@ -411,6 +464,19 @@ function applySettings() {
   });
   saveCustTypeKeywords(newKw);
 
+  // Sub-tipe keywords (Opsi A — terpisah dari custType di atas)
+  const newSubKw = {
+    Mobil: {
+      Leasing: (document.getElementById("subkw_Mobil_Leasing")?.value||"").split(",").map(s=>s.trim()).filter(Boolean),
+      Cash:    (document.getElementById("subkw_Mobil_Cash")?.value||"").split(",").map(s=>s.trim()).filter(Boolean),
+    },
+    GRP: {
+      Fleet: (document.getElementById("subkw_GRP_Fleet")?.value||"").split(",").map(s=>s.trim()).filter(Boolean),
+      NRM:   (document.getElementById("subkw_GRP_NRM")?.value||"").split(",").map(s=>s.trim()).filter(Boolean),
+    },
+  };
+  saveSubTipeKeywords(newSubKw);
+
   // Customer mapping
   const newMapping = {};
   document.querySelectorAll("#mappingRows > div").forEach(row => {
@@ -434,6 +500,24 @@ function applySettings() {
 
   toast("Settings disimpan! ✓", "success");
   renderCurrentPage();
+}
+
+// Simpen keyword sub-tipe yang lagi diketik, terus jalanin recalculate ke semua invoice
+async function runRecalculateSubTipe() {
+  if(!confirm("Jalankan ulang auto-detect sub-tipe (Leasing/Cash, Fleet/NRM) ke semua invoice Mobil & GRP?\n\nInvoice yang sub-tipe-nya udah pernah diubah manual TIDAK akan ketimpa.")) return;
+
+  const newSubKw = {
+    Mobil: {
+      Leasing: (document.getElementById("subkw_Mobil_Leasing")?.value||"").split(",").map(s=>s.trim()).filter(Boolean),
+      Cash:    (document.getElementById("subkw_Mobil_Cash")?.value||"").split(",").map(s=>s.trim()).filter(Boolean),
+    },
+    GRP: {
+      Fleet: (document.getElementById("subkw_GRP_Fleet")?.value||"").split(",").map(s=>s.trim()).filter(Boolean),
+      NRM:   (document.getElementById("subkw_GRP_NRM")?.value||"").split(",").map(s=>s.trim()).filter(Boolean),
+    },
+  };
+  await saveSubTipeKeywords(newSubKw);
+  await recalculateAllSubTipe();
 }
 
 function resetSettings() {
