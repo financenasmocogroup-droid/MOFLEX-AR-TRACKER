@@ -23,6 +23,8 @@ const APP_STATE = {
   dealerFilter:       "Semua", // khusus SuperAdmin — "Semua" = lihat semua dealer
   creditArchiveView:  false, // false = Aktif (masih outstanding), true = Arsip (lunas semua)
   creditDistIncludeArchived: false, // toggle "Lihat Keseluruhan" di donut Credit Risk Distribution
+  historyCache: {}, // NEW: cache hasil Api.getHistory per invoiceId, biar gak fetch ulang tiap render
+  followUpCache: {}, // NEW: cache hasil Api.getFollowUps per invoiceId (lazy-load, gak di-embed lagi di getInvoices)
 };
 
 // ===== SETTINGS LOAD =====
@@ -39,11 +41,42 @@ function loadSettings() {
   } catch {}
 }
 
-function saveSettings(stuckDays, docsConfig, master) {
+async function saveSettings(stuckDays, docsConfig, master) {
   STUCK_DAYS  = {...DEFAULT_STUCK_DAYS,  ...stuckDays};
   DOCS_CONFIG = {...DEFAULT_DOCS,        ...docsConfig};
   if(master) Object.assign(MASTER, master);
   localStorage.setItem(LS_SETTINGS_V2, JSON.stringify({stuckDays, docsConfig, master:MASTER}));
+
+  // FIXED: sebelumnya cuma kesimpen ke localStorage browser masing-masing, gak
+  // pernah sync ke backend — beda device/user beda settingan. Sekarang di-push ke
+  // Settings sheet juga. Backend cuma ngizinin role "head" (handleSaveSettings),
+  // jadi form-nya juga udah di-disable buat role lain di renderSettings().
+  if(Api.isLoggedIn() && APP_STATE.user?.role === "head") {
+    const payload = {};
+    Object.entries(STUCK_DAYS).forEach(([stage, days]) => { payload[`stuck_${stage}`] = days; });
+    Object.entries(DOCS_CONFIG).forEach(([key, docs]) => { payload[`docs_${key}`] = docs; });
+    payload.company_info = MASTER;
+    try {
+      await Api.saveSettings(payload);
+    } catch(e) {
+      console.warn("Settings sync error:", e);
+      toast("Settings tersimpan lokal, tapi gagal sync ke server", "error");
+    }
+  }
+}
+
+// Sub-tipe keyword (Mobil Leasing/Cash, GRP Fleet/NRM) — head-only, konsisten
+// sama Stuck Threshold/Docs Config/Info Perusahaan di atas.
+async function saveSubTipeKeywords(kw) {
+  saveSubTipeKeywordsLocal(kw);
+  if(Api.isLoggedIn() && APP_STATE.user?.role === "head") {
+    try {
+      await Api.saveSettings({ subtipe_keywords: subTipeKeywords });
+    } catch(e) {
+      console.warn("Sync subtipe keywords error:", e);
+      toast("Keyword sub-tipe tersimpan lokal, tapi gagal sync ke server", "error");
+    }
+  }
 }
 
 // ===== NAVIGATION =====
@@ -51,6 +84,7 @@ const PAGE_META = {
   exec:     { title:"Executive Summary",           subtitle:"Laporan real-time kondisi keuangan." },
   ar:       { title:"Accounts Receivable Tracker", subtitle:"Real-time outstanding monitoring dan pipeline analysis." },
   credit:   { title:"Credit Risk Assessment",      subtitle:"Profil risiko dan scoring customer Nasmoco Kaligawe." },
+  users:    { title:"User & Role Management",      subtitle:"Kelola akun dan hak akses pengguna." },
   settings: { title:"Settings",                    subtitle:"Konfigurasi sistem dan preferensi." },
 };
 
@@ -88,6 +122,7 @@ function renderCurrentPage() {
   if(p === "exec")     renderExec();
   else if(p === "ar")  renderARPage();
   else if(p === "credit") renderCreditPage();
+  else if(p === "users") renderUsers();
   else if(p === "settings") renderSettings();
 
   // Update header count
@@ -381,10 +416,12 @@ async function appInit() {
   const user = Api.getUser();
   if(user) setUserDisplay(user);
 
-  // Hide settings kalau bukan head
+  // Hide settings & user management kalau bukan head
   if(user && user.role !== "head") {
     const navSettings = document.getElementById("nav-settings");
     if(navSettings) navSettings.style.display = "none";
+    const navUsers = document.getElementById("nav-users");
+    if(navUsers) navUsers.style.display = "none";
   }
 
   // Populate lunas dropdown dulu
@@ -401,6 +438,7 @@ async function appInit() {
   // Load dari localStorage dulu biar app langsung bisa dipakai
   loadSettings();
   loadScoringSettings();
+  loadSubTipeKeywords();
   customerMapping = loadMapping();
   invoices = loadStorage();
 
@@ -422,6 +460,17 @@ async function appInit() {
         "Lunas":           9999,
       };
     }
+    // FIXED: sebelumnya cuma stuck days yang di-hydrate dari backend, docs config
+    // & info perusahaan gak pernah ditarik ulang — jadi tiap device tetep beda.
+    if(settings) {
+      const docsFromBackend = {};
+      Object.keys(DEFAULT_DOCS).forEach(key => {
+        if(settings[`docs_${key}`] !== undefined) docsFromBackend[key] = settings[`docs_${key}`];
+      });
+      if(Object.keys(docsFromBackend).length > 0) DOCS_CONFIG = {...DEFAULT_DOCS, ...docsFromBackend};
+      if(settings.company_info && typeof settings.company_info === "object") Object.assign(MASTER, settings.company_info);
+      if(settings.subtipe_keywords && typeof settings.subtipe_keywords === "object") saveSubTipeKeywordsLocal(settings.subtipe_keywords);
+    }
 
     // Load customer mapping
     const mapping = await Api.getCustomerMapping();
@@ -433,7 +482,7 @@ async function appInit() {
     // Load invoices dari backend
     const backendInvoices = await Api.getInvoices();
     if(backendInvoices && backendInvoices.length >= 0) {
-      invoices = backendInvoices;
+      invoices = sanitizeInvoiceNumbers(backendInvoices);
       saveStorage();
       renderCurrentPage();
     }
