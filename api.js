@@ -144,6 +144,12 @@ const Api = {
     }});
   },
 
+  async getHistory(invoiceId) {
+    // NEW: sebelumnya endpoint ini ada di backend tapi gak pernah dipanggil dari frontend
+    const data = await this.get({ action: "getHistory", invoiceId: invoiceId||"" });
+    return data.history || [];
+  },
+
   // ===== SETTINGS =====
   async getSettings() {
     const data = await this.get({ action: "getSettings" });
