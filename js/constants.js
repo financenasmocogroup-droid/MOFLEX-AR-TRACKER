@@ -112,7 +112,7 @@ const LS_SUBTIPE_KW_V1  = "moflex_subtipe_keywords_v1";
 
 const DEALER_LIST = [
   "Nasmoco Bantul","Nasmoco Brebes","Nasmoco Cilacap","Nasmoco Demak","Nasmoco Gombel",
-  "Nasmoco Janti","Nasmoco Kaligawe","Nasmoco Karanganyar","Nasmoco Karanjati","Nasmoco Klaten",
+  "Nasmoco Janti","Nasmoco Kaligawe","Nasmoco Karanganyar","Nasmoco Karangjati","Nasmoco Klaten",
   "Nasmoco Magelang","Nasmoco Majapahit","Nasmoco Mlati","Nasmoco Pati","Nasmoco Pekalongan",
   "Nasmoco Pemuda","Nasmoco Purbalingga","Nasmoco Purwokerto","Nasmoco Salatiga","Nasmoco Siliwangi",
   "Nasmoco Slamet Riyadi","Nasmoco Solo Baru","Nasmoco Tegal","Nasmoco Wonosobo",
