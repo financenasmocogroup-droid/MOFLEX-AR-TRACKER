@@ -218,11 +218,14 @@ function renderSettings() {
 // ===== USER & ROLE MANAGEMENT =====
 const ROLE_LABELS = {
   head:        { label:"SuperAdmin", badgeBg:"#ede9fe", badgeColor:"#6d28d9" },
+  admin_dealer:{ label:"Administration Head", badgeBg:"#fce7f3", badgeColor:"#9d174d" },
   admin_bp:    { label:"Admin BP",   badgeBg:"#dbeafe", badgeColor:"#1e40af" },
   admin_grp:   { label:"Admin GRP",  badgeBg:"#d1fae5", badgeColor:"#065f46" },
   admin_sales: { label:"Admin Sales",badgeBg:"#fef3c7", badgeColor:"#92400e" },
 };
-const ROLE_DIVISI = { head:"Semua", admin_bp:"BP", admin_grp:"GRP", admin_sales:"Mobil" };
+// NEW: admin_dealer -> "Semua" divisi TAPI tetap kescope ke 1 dealer (beda sama head
+// yang "Semua" dealer juga). Lihat getDivisi()/filterByRole() di Code.gs.
+const ROLE_DIVISI = { head:"Semua", admin_dealer:"Semua", admin_bp:"BP", admin_grp:"GRP", admin_sales:"Mobil" };
 // DEALER_LIST sekarang di constants.js (dipakai bareng sama app.js buat filter dealer SuperAdmin)
 
 async function loadUsersList() {
