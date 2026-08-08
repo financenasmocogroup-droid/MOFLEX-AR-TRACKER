@@ -253,12 +253,14 @@ function renderUsersTable(users) {
           <th style="padding:8px;background:var(--gray-50);color:var(--gray-400);font-weight:500;text-align:left;border-bottom:0.5px solid var(--border);">Role</th>
           <th style="padding:8px;background:var(--gray-50);color:var(--gray-400);font-weight:500;text-align:left;border-bottom:0.5px solid var(--border);">Dealer</th>
           <th style="padding:8px;background:var(--gray-50);color:var(--gray-400);font-weight:500;text-align:center;border-bottom:0.5px solid var(--border);">Status</th>
+          <th style="padding:8px;background:var(--gray-50);color:var(--gray-400);font-weight:500;text-align:left;border-bottom:0.5px solid var(--border);">Notif WA</th>
           <th style="padding:8px;background:var(--gray-50);color:var(--gray-400);font-weight:500;text-align:right;border-bottom:0.5px solid var(--border);">Aksi</th>
         </tr>
       </thead>
       <tbody>
         ${users.map(u => {
           const rl = ROLE_LABELS[u.role] || { label:u.role, badgeBg:"#f3f4f6", badgeColor:"#374151" };
+          const waMissing = u.notifAktif && !u.noWhatsapp; // NEW: warning kalau notif nyala tapi nomor belum diisi
           return `
             <tr>
               <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);font-weight:500;">${u.nama}</td>
@@ -269,6 +271,11 @@ function renderUsersTable(users) {
               <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);color:var(--gray-500);">${u.role==="head" ? "Semua Dealer" : (u.dealer||"—")}</td>
               <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:center;">
                 ${u.isActive!==false ? `<span class="badge" style="background:var(--green-light);color:#15803d;">Aktif</span>` : `<span class="badge" style="background:var(--red-light);color:var(--red);">Nonaktif</span>`}
+              </td>
+              <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);">
+                ${!u.notifAktif ? `<span style="color:var(--gray-400);">Off</span>`
+                  : waMissing ? `<span class="badge" style="background:var(--red-light);color:var(--red);" title="Notifikasi nyala tapi nomor WA belum diisi">⚠️ Nomor kosong</span>`
+                  : `<span class="badge" style="background:var(--green-light);color:#15803d;">✓ ${u.noWhatsapp}</span>`}
               </td>
               <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:right;">
                 <button class="btn-icon" onclick='openUserModal(${JSON.stringify(u.email)})' title="Edit">✏️</button>
@@ -329,6 +336,17 @@ async function openUserModal(email=null) {
           </select>
           <p style="font-size:11px;color:var(--gray-400);margin-top:4px;">User cuma bisa lihat & kelola invoice dari dealer ini. Satu akun = satu dealer.</p>
         </div>
+        <div class="form-group">
+          <label class="form-label">No. WhatsApp</label>
+          <input type="text" id="um_noWhatsapp" class="form-input" value="${u?.noWhatsapp||""}" placeholder="08xxxxxxxxxx"/>
+          <p style="font-size:11px;color:var(--gray-400);margin-top:4px;">Format lokal (08xxx), dipakai buat kirim notifikasi follow-up harian.</p>
+        </div>
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+            <input type="checkbox" id="um_notifAktif" ${u?.notifAktif?"checked":""}/>
+            Aktifkan notifikasi WhatsApp harian
+          </label>
+        </div>
         ${!isEdit ? `
         <div class="form-group">
           <label class="form-label">Password Awal (opsional)</label>
@@ -352,7 +370,9 @@ async function submitUserForm(editEmail) {
 
   if(!nama || !email || !role) { toast("Nama, email, dan role wajib diisi", "error"); return; }
 
-  const payload = { nama, email, role, divisi: ROLE_DIVISI[role] || "Semua", dealer: role==="head" ? "Semua" : (document.getElementById("um_dealer")?.value || "Semua") };
+  const payload = { nama, email, role, divisi: ROLE_DIVISI[role] || "Semua", dealer: role==="head" ? "Semua" : (document.getElementById("um_dealer")?.value || "Semua"),
+    noWhatsapp: document.getElementById("um_noWhatsapp")?.value?.trim() || "",
+    notifAktif: document.getElementById("um_notifAktif")?.checked === true };
   if(!editEmail && pwdEl?.value) payload.password = pwdEl.value;
 
   try {
