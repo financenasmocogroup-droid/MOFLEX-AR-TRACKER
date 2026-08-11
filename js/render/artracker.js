@@ -780,7 +780,10 @@ function saveEnrichmentField(id, field, value) {
 function renderAging() {
   const el = document.getElementById("agingContent");
   if(!el) return;
-  const invoices = visibleInvoices();
+  // FIXED: sebelumnya invoice yang udah Lunas ikut keitung -- field aging bucket-nya
+  // gak pernah direset ke 0 pas ditandain Lunas, jadi nyangkut selamanya di grafik
+  // padahal piutangnya udah gak outstanding.
+  const invoices = visibleInvoices().filter(i => i.stage !== "Lunas");
 
   const totalAR = invoices.reduce((s,i)=>s+i.total,0);
   const buckets = [
