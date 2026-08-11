@@ -357,12 +357,16 @@ function renderCustDetailPanel(encodedName) {
   if(!cust) return "";
 
   const {total, breakdown, category, autoCritical} = cust.score;
+  // FIXED: sebelumnya invoice yang udah Lunas ikut keitung -- field aging bucket-nya
+  // gak pernah direset ke 0 pas ditandain Lunas, jadi nyangkut selamanya di grafik
+  // padahal piutangnya udah gak outstanding.
+  const activeInvoices = cust.invoices.filter(i => i.stage !== "Lunas");
   const agingBuckets = [
-    {label:"Lancar", val:cust.invoices.reduce((s,i)=>s+i.lancar,0),       color:"#16a34a"},
-    {label:"1-30",   val:cust.invoices.reduce((s,i)=>s+i.aging1_30,0),    color:"#d97706"},
-    {label:"31-60",  val:cust.invoices.reduce((s,i)=>s+i.aging31_60,0),   color:"#ea580c"},
-    {label:"61-90",  val:cust.invoices.reduce((s,i)=>s+i.aging61_90,0),   color:"#dc2626"},
-    {label:">90",    val:cust.invoices.reduce((s,i)=>s+(i.aging91_120||0)+i.aging121_150+i.agingOver150,0), color:"#7f1d1d"},
+    {label:"Lancar", val:activeInvoices.reduce((s,i)=>s+i.lancar,0),       color:"#16a34a"},
+    {label:"1-30",   val:activeInvoices.reduce((s,i)=>s+i.aging1_30,0),    color:"#d97706"},
+    {label:"31-60",  val:activeInvoices.reduce((s,i)=>s+i.aging31_60,0),   color:"#ea580c"},
+    {label:"61-90",  val:activeInvoices.reduce((s,i)=>s+i.aging61_90,0),   color:"#dc2626"},
+    {label:">90",    val:activeInvoices.reduce((s,i)=>s+(i.aging91_120||0)+i.aging121_150+i.agingOver150,0), color:"#7f1d1d"},
   ];
   const totalAging = agingBuckets.reduce((s,b) => s+b.val, 0);
 
