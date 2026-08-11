@@ -21,11 +21,15 @@ function renderExec() {
   const avgCat    = getRiskCategory(avgScore);
 
   // Aging buckets
+  // FIXED: sebelumnya invoice yang udah Lunas ikut keitung -- field aging bucket-nya
+  // gak pernah direset ke 0 pas ditandain Lunas, jadi nyangkut selamanya di grafik
+  // padahal piutangnya udah gak outstanding.
+  const agingInvoices = invoices.filter(i => i.stage !== "Lunas");
   const agingBuckets = [
-    { label:"Lancar",   val:invoices.reduce((s,i)=>s+i.lancar,0),       color:"#16a34a", key:"lancar" },
-    { label:"1–30 Hr",  val:invoices.reduce((s,i)=>s+i.aging1_30,0),    color:"#d97706", key:"1_30"   },
-    { label:"31–60 Hr", val:invoices.reduce((s,i)=>s+i.aging31_60,0),   color:"#ea580c", key:"31_60"  },
-    { label:">60 Hr",   val:invoices.reduce((s,i)=>s+i.aging61_90+i.aging91_120+i.aging121_150+i.agingOver150,0), color:"#dc2626", key:"61_90" },
+    { label:"Lancar",   val:agingInvoices.reduce((s,i)=>s+i.lancar,0),       color:"#16a34a", key:"lancar" },
+    { label:"1–30 Hr",  val:agingInvoices.reduce((s,i)=>s+i.aging1_30,0),    color:"#d97706", key:"1_30"   },
+    { label:"31–60 Hr", val:agingInvoices.reduce((s,i)=>s+i.aging31_60,0),   color:"#ea580c", key:"31_60"  },
+    { label:">60 Hr",   val:agingInvoices.reduce((s,i)=>s+i.aging61_90+i.aging91_120+i.aging121_150+i.agingOver150,0), color:"#dc2626", key:"61_90" },
   ];
 
   // Top risk customers
