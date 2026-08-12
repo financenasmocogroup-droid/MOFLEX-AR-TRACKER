@@ -216,7 +216,7 @@ function getFiltered() {
     if(APP_STATE.filterStage  !== "Semua" && inv.stage !== APP_STATE.filterStage)   return false;
     if(APP_STATE.filterDivisi !== "Semua" && inv.sbr   !== APP_STATE.filterDivisi)  return false;
     if(APP_STATE.agingFilterDivisi && inv.sbr !== APP_STATE.agingFilterDivisi)       return false;
-    if(APP_STATE.agingFilterKey && !(inv[AGING_FIELD[APP_STATE.agingFilterKey]]))    return false;
+    if(APP_STATE.agingFilterKey && (inv.stage === "Lunas" || !(inv[AGING_FIELD[APP_STATE.agingFilterKey]]))) return false;
     if(APP_STATE.filterAlert && !isStuck(inv))                                       return false;
     if(APP_STATE.searchQ) {
       const q = APP_STATE.searchQ.toLowerCase();
