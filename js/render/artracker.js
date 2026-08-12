@@ -780,20 +780,22 @@ function saveEnrichmentField(id, field, value) {
 function renderAging() {
   const el = document.getElementById("agingContent");
   if(!el) return;
-  // FIXED: sebelumnya invoice yang udah Lunas ikut keitung -- field aging bucket-nya
-  // gak pernah direset ke 0 pas ditandain Lunas, jadi nyangkut selamanya di grafik
-  // padahal piutangnya udah gak outstanding.
-  const invoices = visibleInvoices().filter(i => i.stage !== "Lunas");
+  const invoices = visibleInvoices(); // full set -- dipake breakdown per-divisi di bawah (butuh Lunas juga buat itung %)
+  // FIXED: bucket aging exclude Lunas -- field aging gak pernah direset ke 0 pas
+  // ditandain Lunas, jadi nyangkut selamanya di grafik padahal piutangnya udah gak
+  // outstanding. Dipisah jadi variable sendiri (bukan nimpa `invoices`) biar gak
+  // ikut ngerusak breakdown per-divisi di bawah yang emang butuh Lunas buat itung %.
+  const agingInvoices = invoices.filter(i => i.stage !== "Lunas");
 
-  const totalAR = invoices.reduce((s,i)=>s+i.total,0);
+  const totalAR = agingInvoices.reduce((s,i)=>s+i.total,0);
   const buckets = [
-    {key:"lancar",   label:"Lancar",     val:invoices.reduce((s,i)=>s+i.lancar,0),       color:"#16a34a"},
-    {key:"1_30",     label:"1–30 Hari",  val:invoices.reduce((s,i)=>s+i.aging1_30,0),    color:"#d97706"},
-    {key:"31_60",    label:"31–60 Hari", val:invoices.reduce((s,i)=>s+i.aging31_60,0),   color:"#ea580c"},
-    {key:"61_90",    label:"61–90 Hari", val:invoices.reduce((s,i)=>s+i.aging61_90,0),   color:"#dc2626"},
-    {key:"91_120",   label:"91–120 Hari",val:invoices.reduce((s,i)=>s+i.aging91_120,0),  color:"#991b1b"},
-    {key:"121_150",  label:"121–150 Hari",val:invoices.reduce((s,i)=>s+i.aging121_150,0),color:"#7f1d1d"},
-    {key:"over150",  label:">150 Hari",  val:invoices.reduce((s,i)=>s+i.agingOver150,0), color:"#450a0a"},
+    {key:"lancar",   label:"Lancar",     val:agingInvoices.reduce((s,i)=>s+i.lancar,0),       color:"#16a34a"},
+    {key:"1_30",     label:"1–30 Hari",  val:agingInvoices.reduce((s,i)=>s+i.aging1_30,0),    color:"#d97706"},
+    {key:"31_60",    label:"31–60 Hari", val:agingInvoices.reduce((s,i)=>s+i.aging31_60,0),   color:"#ea580c"},
+    {key:"61_90",    label:"61–90 Hari", val:agingInvoices.reduce((s,i)=>s+i.aging61_90,0),   color:"#dc2626"},
+    {key:"91_120",   label:"91–120 Hari",val:agingInvoices.reduce((s,i)=>s+i.aging91_120,0),  color:"#991b1b"},
+    {key:"121_150",  label:"121–150 Hari",val:agingInvoices.reduce((s,i)=>s+i.aging121_150,0),color:"#7f1d1d"},
+    {key:"over150",  label:">150 Hari",  val:agingInvoices.reduce((s,i)=>s+i.agingOver150,0), color:"#450a0a"},
   ];
 
   el.innerHTML = `
@@ -812,7 +814,7 @@ function renderAging() {
             ${buckets.map(b => {
               const pct = totalAR > 0 ? b.val/totalAR*100 : 0;
               const isOpen = agingBreakdownBucket === b.key;
-              const bInvs = invoices.filter(i=>(i[AGING_FIELD[b.key]]||0)!==0);
+              const bInvs = agingInvoices.filter(i=>(i[AGING_FIELD[b.key]]||0)!==0);
               const bpV = bInvs.filter(i=>i.sbr==="BP").reduce((s,i)=>s+(i[AGING_FIELD[b.key]]||0),0);
               const grV = bInvs.filter(i=>i.sbr==="GRP").reduce((s,i)=>s+(i[AGING_FIELD[b.key]]||0),0);
               const mbV = bInvs.filter(i=>i.sbr==="Mobil").reduce((s,i)=>s+(i[AGING_FIELD[b.key]]||0),0);
