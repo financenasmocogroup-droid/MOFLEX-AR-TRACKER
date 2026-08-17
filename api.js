@@ -5,6 +5,30 @@
 
 const BACKEND_URL = "https://script.google.com/macros/s/AKfycbyx_58SyQDTdYSIuF_-SFEkbLG4nHEopObcBlBIi6r1vviCZ3IhBABEMenM_F1hD8s1/exec";
 
+// FIXED: native fetch() gak punya timeout default -- kalau Apps Script lagi
+// "sibuk" (banyak eksekusi bersamaan, kena batas concurrent execution Google),
+// request bisa nge-gantung TANPA BATAS WAKTU, gak pernah sukses ATAU gagal.
+// User cuma liat "Sinkronisasi data..." nempel selamanya (pernah kejadian
+// beneran ke user Admin GR Demak). Sekarang tiap request dikasih timeout, dan
+// kalau gagal/timeout dicoba lagi otomatis beberapa kali dengan jeda.
+async function fetchWithRetry(url, options = {}, { timeoutMs = 20000, retries = 2, retryDelayMs = 2000 } = {}) {
+  let lastErr;
+  for(let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+      return res;
+    } catch(err) {
+      clearTimeout(timer);
+      lastErr = err;
+      if(attempt < retries) await new Promise(r => setTimeout(r, retryDelayMs * (attempt + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 const Api = {
 
   // ===== SESSION =====
@@ -53,9 +77,9 @@ const Api = {
   },
 
   // ===== BASE FETCH =====
-  async get(params = {}) {
+  async get(params = {}, retryOpts = {}) {
     const qs  = new URLSearchParams({ ...params, token: this.getToken() }).toString();
-    const res = await fetch(`${BACKEND_URL}?${qs}`);
+    const res = await fetchWithRetry(`${BACKEND_URL}?${qs}`, {}, retryOpts);
     const data = await res.json();
     if(data.code === 401) { await this.logout(); throw new Error("Sesi expired"); }
     if(!data.ok) throw new Error(data.error || "Request gagal");
@@ -63,7 +87,7 @@ const Api = {
   },
 
   async post(body = {}) {
-    const res = await fetch(BACKEND_URL, {
+    const res = await fetchWithRetry(BACKEND_URL, {
       method:  "POST",
       headers: { "Content-Type": "text/plain" },
       body:    JSON.stringify({ ...body, token: this.getToken() }),
@@ -105,7 +129,7 @@ const Api = {
 
   // ===== INVOICES =====
   async getInvoices() {
-    const data = await this.get({ action: "getInvoices" });
+    const data = await this.get({ action: "getInvoices" }, { timeoutMs: 30000 });
     return data.invoices || [];
   },
 
@@ -220,4 +244,19 @@ function showApiLoader(msg="Memuat data...") {
 function hideApiLoader() {
   const el = document.getElementById("apiLoader");
   if(el) el.style.display = "none";
+}
+
+// NEW: dipanggil kalau sync ke backend gagal total (setelah retry habis) --
+// sebelumnya cuma diem-diem fallback ke cache tanpa kasih tau user apa-apa,
+// atau malah nge-gantung selamanya tanpa penjelasan sama sekali.
+function showApiError(msg, retryFn) {
+  let el = document.getElementById("apiLoader");
+  if(!el) {
+    el = document.createElement("div");
+    el.id = "apiLoader";
+    document.body.appendChild(el);
+  }
+  el.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#7f1d1d;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;z-index:9999;display:flex;align-items:center;gap:12px;box-shadow:0 4px 16px rgba(0,0,0,0.2);";
+  el.innerHTML = `<span>⚠️ ${msg}</span><button id="apiErrorRetryBtn" style="background:#fff;color:#7f1d1d;border:none;padding:5px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0;">Coba Lagi</button>`;
+  document.getElementById("apiErrorRetryBtn").onclick = () => { hideApiLoader(); retryFn(); };
 }
