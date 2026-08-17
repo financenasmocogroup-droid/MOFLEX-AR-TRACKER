@@ -323,14 +323,31 @@ function renderMonitoring() {
             placeholder="Cari invoice / customer..."
             value="${APP_STATE.searchQ.replace(/"/g,'&quot;')}"
             oninput="handleSearchInput(this.value)"/>
-          <select class="filter-select" onchange="APP_STATE.filterStage=this.value;APP_STATE.activeFilterBanner=null;APP_STATE.agingFilterKey=null;renderMonitoring()">
+          <select class="filter-select" onchange="APP_STATE.filterStage=this.value;APP_STATE.activeFilterBanner=null;APP_STATE.agingFilterKey=null;APP_STATE.filterKurangBayar=false;renderMonitoring()">
             ${["Semua",...STAGES].map(s=>`<option ${APP_STATE.filterStage===s?"selected":""}>${s}</option>`).join("")}
           </select>
-          <select class="filter-select" onchange="APP_STATE.filterDivisi=this.value;APP_STATE.activeFilterBanner=null;renderMonitoring()">
+          <select class="filter-select" onchange="APP_STATE.filterDivisi=this.value;APP_STATE.activeFilterBanner=null;APP_STATE.filterKurangBayar=false;renderMonitoring()">
             ${["Semua",...DIVISI].map(d=>`<option ${APP_STATE.filterDivisi===d?"selected":""}>${d}</option>`).join("")}
           </select>
+          <select class="filter-select" onchange="APP_STATE.filterSales=this.value;renderMonitoring()">
+            ${(() => {
+              // NEW: opsi nama Sales/SA ngikutin divisi yang lagi difilter -- kalau
+              // Divisi diganti dan nama yang lagi dipilih gak ada di divisi baru,
+              // sengaja dibiarin apa adanya (hasil listnya jadi kosong), gak di-reset
+              // otomatis ke "Semua" -- biar user sadar ada mismatch filter.
+              const salesOptions = [...new Set(
+                visibleInvoices()
+                  .filter(i => APP_STATE.filterDivisi==="Semua" || i.sbr===APP_STATE.filterDivisi)
+                  .map(i => i.salesSA)
+                  .filter(Boolean)
+              )].sort();
+              return [`<option ${APP_STATE.filterSales==="Semua"?"selected":""}>Semua</option>`]
+                .concat(salesOptions.map(s=>`<option ${APP_STATE.filterSales===s?"selected":""}>${s}</option>`))
+                .join("");
+            })()}
+          </select>
           <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;color:var(--gray-600);">
-            <input type="checkbox" ${APP_STATE.filterAlert?"checked":""} onchange="APP_STATE.filterAlert=this.checked;renderMonitoring()"/> Perlu Perhatian
+            <input type="checkbox" ${APP_STATE.filterAlert?"checked":""} onchange="APP_STATE.filterAlert=this.checked;APP_STATE.filterKurangBayar=false;renderMonitoring()"/> Perlu Perhatian
           </label>
           <span style="margin-left:auto;font-size:12px;color:var(--gray-400);">${filtered.length} invoice</span>
           <button class="btn-sm" onclick="openAddModal()">+ Manual</button>
