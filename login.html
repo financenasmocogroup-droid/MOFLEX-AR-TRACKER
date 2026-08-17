@@ -417,6 +417,28 @@ body {
 <script>
 const BACKEND_URL = "https://script.google.com/macros/s/AKfycbyx_58SyQDTdYSIuF_-SFEkbLG4nHEopObcBlBIi6r1vviCZ3IhBABEMenM_F1hD8s1/exec";
 
+// FIXED: native fetch() gak punya timeout default -- kalau Apps Script lagi
+// "sibuk" (banyak eksekusi bersamaan), request login bisa nge-gantung TANPA
+// BATAS WAKTU (pernah kejadian, "kadang gak bisa login"). Halaman ini terpisah
+// dari api.js (belum ada session pas login), jadi butuh helper sendiri.
+async function fetchWithRetry(url, options = {}, { timeoutMs = 20000, retries = 2, retryDelayMs = 2000 } = {}) {
+  let lastErr;
+  for(let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+      return res;
+    } catch(err) {
+      clearTimeout(timer);
+      lastErr = err;
+      if(attempt < retries) await new Promise(r => setTimeout(r, retryDelayMs * (attempt + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 function togglePwd() {
   const inp = document.getElementById("password");
   const btn = document.getElementById("eyeBtn");
@@ -459,7 +481,7 @@ async function doLogin() {
   setLoading(true);
 
   try {
-    const res  = await fetch(BACKEND_URL, {
+    const res  = await fetchWithRetry(BACKEND_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: JSON.stringify({ action: "login", email, password }),
@@ -481,7 +503,10 @@ async function doLogin() {
     setTimeout(() => window.location.href = "index.html", 800);
 
   } catch(err) {
-    showAlert("Gagal terhubung ke server. Periksa koneksi internet Anda.");
+    // FIXED: sebelumnya pesan generik "gagal terhubung" walau penyebabnya
+    // server lagi sibuk (bukan koneksi internet user) -- setelah 3x percobaan
+    // (fetchWithRetry) tetep gagal, kasih pesan yang lebih jujur.
+    showAlert("Server sedang sibuk, coba lagi dalam beberapa saat.");
     setLoading(false);
   }
 }
@@ -502,7 +527,7 @@ document.addEventListener("mousemove", (e) => {
 window.addEventListener("load", () => {
   const token = sessionStorage.getItem("moflex_token") || localStorage.getItem("moflex_token");
   if(!token) return;
-  fetch(BACKEND_URL, {
+  fetchWithRetry(BACKEND_URL, {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
     body: JSON.stringify({ action: "checkSession", token }),
