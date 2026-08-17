@@ -6,7 +6,9 @@ const APP_STATE = {
   user:          null,
   filterStage:   "Semua",
   filterDivisi:  "Semua",
+  filterSales:   "Semua", // NEW: filter Sales/SA, dependent ke filterDivisi
   filterAlert:   false,
+  filterKurangBayar: false, // NEW: true = cuma tampilin invoice Lunas TAPI nominalDiterima < total
   searchQ:       "",
   selectedIds:   new Set(),
   selectedId:    null,
@@ -215,9 +217,14 @@ function getFiltered() {
   return visibleInvoices().filter(inv => {
     if(APP_STATE.filterStage  !== "Semua" && inv.stage !== APP_STATE.filterStage)   return false;
     if(APP_STATE.filterDivisi !== "Semua" && inv.sbr   !== APP_STATE.filterDivisi)  return false;
+    if(APP_STATE.filterSales  !== "Semua" && inv.salesSA !== APP_STATE.filterSales) return false;
     if(APP_STATE.agingFilterDivisi && inv.sbr !== APP_STATE.agingFilterDivisi)       return false;
     if(APP_STATE.agingFilterKey && (inv.stage === "Lunas" || !(inv[AGING_FIELD[APP_STATE.agingFilterKey]]))) return false;
     if(APP_STATE.filterAlert && !isStuck(inv))                                       return false;
+    // FIXED: sebelumnya "Kurang Bayar" cuma nyetel filterStage="Lunas" doang, jadi
+    // nampilin SEMUA invoice lunas (termasuk yang nominalnya udah pas/lebih) --
+    // banner-nya bilang "Kurang Bayar" tapi gak beneran nyaring itu.
+    if(APP_STATE.filterKurangBayar && !(inv.stage==="Lunas" && (inv.nominalDiterima||0) < inv.total && inv.total > 0)) return false;
     if(APP_STATE.searchQ) {
       const q = APP_STATE.searchQ.toLowerCase();
       if(!inv.noInvoice.toLowerCase().includes(q) && !inv.namaCust.toLowerCase().includes(q)) return false;
@@ -230,18 +237,24 @@ function getFiltered() {
 function jumpToStage(stage, divisi="Semua") {
   APP_STATE.filterStage  = stage;
   APP_STATE.filterDivisi = divisi;
+  APP_STATE.filterSales  = "Semua";
   APP_STATE.agingFilterKey    = null;
   APP_STATE.agingFilterDivisi = null;
+  APP_STATE.filterKurangBayar = false;
   APP_STATE.activeFilterBanner = { label: divisi !== "Semua" ? `${divisi} · ${stage}` : stage };
   navigateTo("ar");
   switchARTab("monitoring", document.querySelectorAll("#arSubtabs .subtab")[1]);
 }
 
 function jumpToKurangBayar() {
-  APP_STATE.filterStage  = "Lunas";
+  // FIXED: sebelumnya cuma filterStage="Lunas" (nampilin semua invoice lunas),
+  // sekarang beneran nyaring yang nominalDiterima-nya kurang dari total.
+  APP_STATE.filterStage  = "Semua";
   APP_STATE.filterDivisi = "Semua";
+  APP_STATE.filterSales  = "Semua";
   APP_STATE.agingFilterKey    = null;
   APP_STATE.agingFilterDivisi = null;
+  APP_STATE.filterKurangBayar = true;
   APP_STATE.activeFilterBanner = { label:"Kurang Bayar" };
   navigateTo("ar");
   switchARTab("monitoring", document.querySelectorAll("#arSubtabs .subtab")[1]);
@@ -250,6 +263,8 @@ function jumpToKurangBayar() {
 function jumpToAlert() {
   APP_STATE.filterAlert = true;
   APP_STATE.filterStage = "Semua";
+  APP_STATE.filterSales = "Semua";
+  APP_STATE.filterKurangBayar = false;
   APP_STATE.activeFilterBanner = { label:"Perlu Perhatian (Stuck)" };
   navigateTo("ar");
   switchARTab("monitoring", document.querySelectorAll("#arSubtabs .subtab")[1]);
@@ -258,8 +273,10 @@ function jumpToAlert() {
 function jumpFromAging(agingKey, divisi=null) {
   APP_STATE.filterStage  = "Semua";
   APP_STATE.filterDivisi = "Semua";
+  APP_STATE.filterSales  = "Semua";
   APP_STATE.agingFilterKey    = agingKey;
   APP_STATE.agingFilterDivisi = divisi;
+  APP_STATE.filterKurangBayar = false;
   APP_STATE.activeFilterBanner = { label: divisi ? `${AGING_LABEL[agingKey]} · ${divisi}` : AGING_LABEL[agingKey] };
   navigateTo("ar");
   switchARTab("monitoring", document.querySelectorAll("#arSubtabs .subtab")[1]);
@@ -270,8 +287,10 @@ function clearActiveFilter() {
   APP_STATE.agingFilterKey     = null;
   APP_STATE.agingFilterDivisi  = null;
   APP_STATE.filterAlert        = false;
+  APP_STATE.filterKurangBayar  = false;
   APP_STATE.filterStage        = "Semua";
   APP_STATE.filterDivisi       = "Semua";
+  APP_STATE.filterSales        = "Semua";
   renderMonitoring();
 }
 
@@ -490,7 +509,11 @@ async function appInit() {
     hideApiLoader();
   } catch(e) {
     console.warn("Backend sync error, pakai cache:", e);
-    hideApiLoader();
+    // FIXED: sebelumnya diem-diem fallback ke cache tanpa kasih tau user apa-apa
+    // -- kalau cache-nya kosong/basi (misal user baru pertama kali login di
+    // device itu), tampilannya jadi kosong tanpa penjelasan. Sekarang kasih
+    // pesan jelas + tombol buat coba sync ulang manual.
+    showApiError("Gagal sinkronisasi data terbaru. Menampilkan data cache.", () => appInit());
   }
 }
 function toggleAvatarMenu() {
