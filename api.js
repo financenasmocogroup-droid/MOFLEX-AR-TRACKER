@@ -233,10 +233,16 @@ function showApiLoader(msg="Memuat data...") {
   if(!el) {
     el = document.createElement("div");
     el.id = "apiLoader";
-    el.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e1b4b;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;z-index:9999;display:flex;align-items:center;gap:10px;box-shadow:0 4px 16px rgba(0,0,0,0.2);";
-    el.innerHTML = `<div style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0;"></div><span id="apiLoaderMsg"></span>`;
     document.body.appendChild(el);
   }
+  // FIXED: sebelumnya struktur HTML cuma dibikin sekali (pas elemen belum ada).
+  // Kalau showApiError() sempet jalan duluan (nimpa innerHTML jadi versi error+
+  // tombol), showApiLoader() berikutnya nemu elemen ini UDAH ADA, jadi skip
+  // bikin ulang strukturnya -- lanjut nulis ke #apiLoaderMsg yang udah gak ada
+  // lagi di DOM -> error diem-diem -> proses retry keputus sebelum sempet
+  // nyoba fetch ulang. Sekarang selalu di-reset ulang tiap dipanggil.
+  el.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e1b4b;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;z-index:9999;display:flex;align-items:center;gap:10px;box-shadow:0 4px 16px rgba(0,0,0,0.2);";
+  el.innerHTML = `<div style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0;"></div><span id="apiLoaderMsg"></span>`;
   el.querySelector("#apiLoaderMsg").textContent = msg;
   el.style.display = "flex";
 }
