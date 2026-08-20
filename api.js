@@ -73,6 +73,10 @@ const Api = {
     sessionStorage.removeItem("moflex_user");
     localStorage.removeItem("moflex_token");
     localStorage.removeItem("moflex_user");
+    // FIXED: defense-in-depth, konsisten sama fix di login.html -- cache
+    // invoice juga dibersihin pas logout eksplisit, biar gak nyangkut buat
+    // sesi berikutnya di device yang sama.
+    ["moflex_invoices_v1","ar_monitoring_v5"].forEach(k => { localStorage.removeItem(k); sessionStorage.removeItem(k); });
     window.location.href = "login.html";
   },
 
