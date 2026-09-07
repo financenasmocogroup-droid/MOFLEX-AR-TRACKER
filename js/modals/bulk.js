@@ -179,16 +179,14 @@ function toggleBulkSameDay(checked) {
   else if(tglTerima) { tglTerima.disabled = false; }
 }
 
-// FIXED (Opsi 2): applyBulkStage/PlanKirim/Lunas/Dokumen/Cetak sekarang
-// proses SEMUA invoice secara LOKAL dulu (instan, gak ada network call
-// per-invoice), baru kirim SEMUANYA dalam 1 kali panggilan
-// Api.batchUpsertInvoices() di akhir -- gabungan correctness (gak ada lagi
-// race condition, warisan dari fix sequential-await sebelumnya) + speed (1
-// request borongan, bukan N request bolak-balik). applyBulkFollowUp TETAP
-// pakai versi sequential-await (belum dikonversi) karena manggil
-// addFollowUp() yang beda mekanisme (nulis sheet FollowUps, bukan sekadar
-// update invoice) -- itu nunggu endpoint batch khusus follow-up (Tahap D2,
-// belum dibikin).
+// FIXED: SEMUA fungsi bulk di bawah ini sebelumnya pake .forEach() yang manggil
+// updateInvoice/addHistory/addFollowUp dkk TANPA nunggu satu selesai dulu --
+// karena fungsi-fungsi itu manggil server, hasilnya SEMUA invoice yang dipilih
+// nembak request ke Apps Script BARENGAN dalam sepersekian detik. Ini yang
+// nyebabin race condition & request gagal ("Failed 0s") pas bulk action,
+// apalagi kalau invoice yang dipilih banyak. Sekarang semua diproses SATU-SATU
+// berurutan (for...of + await) -- lebih lambat totalnya, tapi gak lagi bikin
+// beberapa eksekusi Apps Script tabrakan di waktu yang sama.
 
 async function applyBulkStage() {
   const stage = document.getElementById("bulkStageSelect").value;
@@ -199,30 +197,17 @@ async function applyBulkStage() {
     toast(`⛔ ${blocked.length} invoice tidak memenuhi syarat: ${reasons.join(", ")}`, "error");
     return;
   }
-
-  showApiLoader(`Menyiapkan ${ids.length} invoice...`);
-  ids.forEach(id => updateInvoiceLocal(id, {stage}));
-  saveStorage();
-
-  const touched = ids.map(id => getInv(id)).filter(Boolean);
-  showApiLoader(`Menyimpan ${touched.length} invoice ke server...`);
-
-  try {
-    if(Api.isLoggedIn()) {
-      await Api.batchUpsertInvoices(touched);
-      await addHistory("SYSTEM", `Bulk: ${touched.length} invoice → Stage "${stage}"`);
-    }
-  } catch(e) {
-    console.warn("Bulk sync error:", e);
-    hideApiLoader();
-    showApiError(`Gagal menyimpan ${touched.length} invoice ke server. Data masih aman di perangkat ini, coba lagi.`, () => applyBulkStage());
-    return;
+  showApiLoader(`Memproses 0/${ids.length} invoice...`);
+  let c = 0;
+  for(const id of ids) {
+    await updateInvoice(id, {stage});
+    c++;
+    showApiLoader(`Memproses ${c}/${ids.length} invoice...`);
   }
-
   hideApiLoader();
   APP_STATE.selectedIds.clear();
   rerenderBulkBar();
-  toast(`${touched.length} invoice → "${stage}"`, "success");
+  toast(`${c} invoice → "${stage}"`, "success");
   openBulkModal();
   invalidateCreditCache();
   renderCurrentPage();
@@ -233,35 +218,20 @@ async function applyBulkPlanKirim() {
   const sameDay   = document.getElementById("bulkLangDiterima")?.checked;
   const tglTerima = sameDay ? tglKirim : (document.getElementById("bulkTglTerima")?.value || "");
   const ids = [...APP_STATE.selectedIds];
-
-  showApiLoader(`Menyiapkan ${ids.length} invoice...`);
-  const patch = {planKirim: tglKirim};
-  if(tglTerima) patch.tglTerima = tglTerima;
-  ids.forEach(id => updateInvoiceLocal(id, patch));
-  saveStorage();
-
-  const touched = ids.map(id => getInv(id)).filter(Boolean);
-  showApiLoader(`Menyimpan ${touched.length} invoice ke server...`);
-
-  try {
-    if(Api.isLoggedIn()) {
-      await Api.batchUpsertInvoices(touched);
-      const aksi = sameDay
-        ? `Bulk: ${touched.length} invoice → plan kirim & same day terima: ${tglKirim}`
-        : `Bulk: ${touched.length} invoice → plan kirim: ${tglKirim}`;
-      await addHistory("SYSTEM", aksi);
-    }
-  } catch(e) {
-    console.warn("Bulk sync error:", e);
-    hideApiLoader();
-    showApiError(`Gagal menyimpan ${touched.length} invoice ke server. Coba lagi.`, () => applyBulkPlanKirim());
-    return;
+  showApiLoader(`Memproses 0/${ids.length} invoice...`);
+  let c = 0;
+  for(const id of ids) {
+    const patch = {planKirim: tglKirim};
+    if(tglTerima) patch.tglTerima = tglTerima;
+    await updateInvoice(id, patch);
+    if(sameDay) await addHistory(id, `Plan kirim & same day terima: ${tglKirim}`);
+    c++;
+    showApiLoader(`Memproses ${c}/${ids.length} invoice...`);
   }
-
   hideApiLoader();
   APP_STATE.selectedIds.clear();
   rerenderBulkBar();
-  toast(`${touched.length} invoice diset plan kirim`, "success");
+  toast(`${c} invoice diset plan kirim`, "success");
   openBulkModal();
   renderCurrentPage();
 }
@@ -299,42 +269,24 @@ async function applyBulkLunas() {
   const ket          = document.getElementById("bulkLunasKet")?.value || "";
   const ketCustom    = document.getElementById("bulkLunasKetCustom")?.value || "";
   const ids = [...APP_STATE.selectedIds];
-
-  showApiLoader(`Menyiapkan ${ids.length} invoice...`);
-  let blocked = 0;
-  const eligibleIds = [];
-  ids.forEach(id => {
+  showApiLoader(`Memproses 0/${ids.length} invoice...`);
+  let c = 0, blocked = 0, done = 0;
+  for(const id of ids) {
     const inv = getInv(id);
-    if(!inv || !inv.fuCleared) { blocked++; return; }
+    if(!inv.fuCleared) { blocked++; done++; showApiLoader(`Memproses ${done}/${ids.length} invoice...`); continue; }
     const nominal = nominalInput || inv.total;
-    updateInvoiceLocal(id, {
+    await updateInvoice(id, {
       stage:"Lunas", tglLunas:tgl, stageUpdatedAt:tgl,
       nominalDiterima:nominal, selisih:nominal-inv.total,
       keteranganLunas:ket, keteranganLunasCustom:ketCustom,
     });
-    eligibleIds.push(id);
-  });
-  saveStorage();
-
-  const touched = eligibleIds.map(id => getInv(id)).filter(Boolean);
-  showApiLoader(`Menyimpan ${touched.length} invoice ke server...`);
-
-  try {
-    if(touched.length && Api.isLoggedIn()) {
-      await Api.batchUpsertInvoices(touched);
-      await addHistory("SYSTEM", `Bulk: ${touched.length} invoice ditandai Lunas`);
-    }
-  } catch(e) {
-    console.warn("Bulk sync error:", e);
-    hideApiLoader();
-    showApiError(`Gagal menyimpan ${touched.length} invoice ke server. Coba lagi.`, () => applyBulkLunas());
-    return;
+    c++; done++;
+    showApiLoader(`Memproses ${done}/${ids.length} invoice...`);
   }
-
   hideApiLoader();
   APP_STATE.selectedIds.clear();
   rerenderBulkBar();
-  toast(`${touched.length} invoice lunas ✅${blocked>0?` · ${blocked} dilewati (FU belum clear)`:""}`, "success");
+  toast(`${c} invoice lunas ✅${blocked>0?` · ${blocked} dilewati (FU belum clear)`:""}`, "success");
   invalidateCreditCache();
   renderCurrentPage();
   openBulkModal();
@@ -352,35 +304,20 @@ async function applyBulkDokumen() {
   });
   if(!checked.length) { toast("Pilih minimal 1 dokumen!", "error"); return; }
   const ids = [...APP_STATE.selectedIds];
-
-  showApiLoader(`Menyiapkan ${ids.length} invoice...`);
-  ids.forEach(id => {
+  showApiLoader(`Memproses 0/${ids.length} invoice...`);
+  let c = 0;
+  for(const id of ids) {
     const inv = getInv(id);
     const dok = {...(inv.dokumen||{})};
     checked.forEach(d => dok[d] = true);
-    updateInvoiceLocal(id, {dokumen:dok});
-  });
-  saveStorage();
-
-  const touched = ids.map(id => getInv(id)).filter(Boolean);
-  showApiLoader(`Menyimpan ${touched.length} invoice ke server...`);
-
-  try {
-    if(Api.isLoggedIn()) {
-      await Api.batchUpsertInvoices(touched);
-      await addHistory("SYSTEM", `Bulk: dokumen diupdate untuk ${touched.length} invoice`);
-    }
-  } catch(e) {
-    console.warn("Bulk sync error:", e);
-    hideApiLoader();
-    showApiError(`Gagal menyimpan ${touched.length} invoice ke server. Coba lagi.`, () => applyBulkDokumen());
-    return;
+    await updateInvoice(id, {dokumen:dok});
+    c++;
+    showApiLoader(`Memproses ${c}/${ids.length} invoice...`);
   }
-
   hideApiLoader();
   APP_STATE.selectedIds.clear();
   rerenderBulkBar();
-  toast(`Dokumen diupdate untuk ${touched.length} invoice`, "success");
+  toast(`Dokumen diupdate untuk ${c} invoice`, "success");
   openBulkModal();
   renderCurrentPage();
 }
@@ -465,29 +402,10 @@ async function applyBulkCetak(format) {
     a.click();
   }
 
-  // FIXED (Opsi 2): riwayat cetak per invoice diupdate LOKAL dulu, baru
-  // dikirim 1 kali batch -- bukan logCetak() satu-satu berurutan lagi.
-  showApiLoader(`Menyimpan riwayat cetak untuk ${invList.length} invoice...`);
-  invList.forEach(inv => {
-    updateInvoiceLocal(inv.id, {
-      cetakHistory: [...(inv.cetakHistory||[]), {tgl:nowTime(), tipe:opts.tipe, noSurat:opts.noSurat, format}]
-    });
-  });
-  saveStorage();
-
-  const touchedCetak = invList.map(inv => getInv(inv.id)).filter(Boolean);
-  try {
-    if(Api.isLoggedIn()) {
-      await Api.batchUpsertInvoices(touchedCetak);
-      await addHistory("SYSTEM", `Bulk cetak ${format==="pdf"?"PDF":"Word"}: ${opts.tipe} — ${opts.noSurat||"-"} (${touchedCetak.length} invoice)`);
-    }
-  } catch(e) {
-    console.warn("Bulk cetak sync error:", e);
-    toast("File tercetak, tapi gagal simpan riwayat cetak ke server. Cek koneksi.", "error");
-  }
-  hideApiLoader();
-
+  // FIXED: sebelumnya diproses BARENGAN (forEach) -- sekarang satu-satu berurutan
+  for(const inv of invList) await logCetak(inv.id, opts.tipe, opts.noSurat, format==="pdf"?"PDF":"Word");
   APP_STATE.selectedIds.clear();
   rerenderBulkBar();
+  saveStorage();
   openBulkModal();
 }
