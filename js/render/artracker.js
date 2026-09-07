@@ -115,10 +115,13 @@ async function submitFU(id) {
   const problemId    = document.getElementById("fuProblemId")?.value || "";
   const promiseMining = document.getElementById("fuPromiseMining")?.value || "";
   await addFollowUp(id, {tgl, status, alasan, remarks, promiseToPay});
-  // Sync enrichment fields to invoice level
-  if(problemId)    { saveEnrichmentField(id, "problemId", problemId); invalidateCreditCache(); }
-  if(remarks)        saveEnrichmentField(id, "lastRemark", remarks);
-  if(promiseMining)  saveEnrichmentField(id, "promiseMining", promiseMining);
+  // FIXED: sebelumnya 3 field enrichment ini disimpen BARENGAN (gak di-await),
+  // jadi 1 kali submit Follow Up bisa nembak beberapa request sekaligus ke Apps
+  // Script -> race condition, kadang gagal ("Gagal menyimpan Follow Up ke
+  // server"). Sekarang disimpen satu-satu berurutan.
+  if(problemId)      { await saveEnrichmentField(id, "problemId", problemId); invalidateCreditCache(); }
+  if(remarks)         await saveEnrichmentField(id, "lastRemark", remarks);
+  if(promiseMining)   await saveEnrichmentField(id, "promiseMining", promiseMining);
   toast("Follow Up disimpan ✓", "success");
   renderMonitoring();
 }
@@ -130,13 +133,14 @@ function tandaiLengkapSemua(id){ const inv=getInv(id); const dok={}; getDocsForI
 function savePlanKirim(id)     { const v=document.getElementById("planKirimInput")?.value; if(v){updateInvoice(id,{planKirim:v});toast("Plan kirim disimpan!","success");renderMonitoring();} }
 function saveTglTerima(id)     { const v=document.getElementById("tglTerimaInput")?.value; if(v){updateInvoice(id,{tglTerima:v});addHistory(id,`Tgl terima: ${v}`);toast("Tgl terima disimpan!","success");renderMonitoring();} }
 function toggleLangDiterima(id,checked){ updateInvoice(id,{tglTerima:checked?today():""}); if(checked) addHistory(id,"Konfirmasi terima same day"); renderMonitoring(); }
-function saveAdjustSPK(id){
+async function saveAdjustSPK(id){
   const lama=document.getElementById("spkLama")?.value?.trim();
   const baru=document.getElementById("spkBaru")?.value?.trim();
   if(!baru){toast("No. SPK Baru wajib diisi!","error");return;}
   const inv=getInv(id);
-  updateInvoice(id,{noSPK:baru,adjustSPK:[...(inv.adjustSPK||[]),{noSPKLama:lama||inv.noSPK,noSPKBaru:baru,catatan:document.getElementById("spkCatatan")?.value?.trim()||"",tgl:today()}]});
-  addHistory(id,`Adjust SPK: ${lama} → ${baru}`);toast("Adjust SPK disimpan!","success");renderMonitoring();
+  await updateInvoice(id,{noSPK:baru,adjustSPK:[...(inv.adjustSPK||[]),{noSPKLama:lama||inv.noSPK,noSPKBaru:baru,catatan:document.getElementById("spkCatatan")?.value?.trim()||"",tgl:today()}]});
+  await addHistory(id,`Adjust SPK: ${lama} → ${baru}`);
+  toast("Adjust SPK disimpan!","success");renderMonitoring();
 }
 function renderSelisihBadge(s){ return s===0?`<span class="selisih-badge pas">✓ Pas</span>`:s<0?`<span class="selisih-badge kurang">Kurang ${fmtRp(Math.abs(s))}</span>`:`<span class="selisih-badge lebih">Lebih ${fmtRp(s)}</span>`; }
 function previewSelisih(id,v){ const inv=getInv(id); if(!inv)return; const el=document.getElementById(`selisihPreview_${id}`); if(el) el.innerHTML=renderSelisihBadge((parseFloat(v)||0)-inv.total); }
@@ -628,7 +632,7 @@ function renderDetailPanel(inv) {
               <p style="font-size:11px;color:var(--gray-400);margin-top:1px;">${inv.followUpCount||0} FU${fuLoading?" · memuat detail...":` · ${promises.length} Promise`}</p>
             </div>
             ${cleared?`
-              <button onclick="updateInvoice('${inv.id}',{fuCleared:false});addHistory('${inv.id}','FU Clear dibatalkan');renderMonitoring();"
+              <button onclick="cancelFuClear('${inv.id}');"
                 style="font-size:11px;padding:4px 10px;border:0.5px solid #fca5a5;border-radius:var(--r-sm);color:var(--red);background:#fff;cursor:pointer;">Batal</button>`:
               `<button onclick="clearFollowUp('${inv.id}');renderMonitoring();"
                 style="font-size:11px;padding:4px 10px;background:#16a34a;color:#fff;border:none;border-radius:var(--r-sm);cursor:pointer;">✓ Clear FU</button>`}
@@ -786,11 +790,11 @@ function renderDetailPanel(inv) {
 }
 
 // Enrichment field quick save
-function saveEnrichmentField(id, field, value) {
+async function saveEnrichmentField(id, field, value) {
   const patch = {};
   patch[field] = value;
-  updateInvoice(id, patch);
-  addHistory(id, `${field}: ${value}`);
+  await updateInvoice(id, patch);
+  await addHistory(id, `${field}: ${value}`);
 }
 
 // ---- AGING ----
