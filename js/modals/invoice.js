@@ -271,14 +271,14 @@ function buildSuratHTML(inv, opts) {
     </div>`;
 }
 
-function logCetak(id, tipe, noSurat, format) {
+async function logCetak(id, tipe, noSurat, format) {
   const inv = getInv(id);
   if(!inv) return;
-  updateInvoice(id, {cetakHistory: [...(inv.cetakHistory||[]), {tgl:nowTime(), tipe, noSurat, format}]});
-  addHistory(id, `Cetak ${format}: ${tipe} — ${noSurat||"-"}`);
+  await updateInvoice(id, {cetakHistory: [...(inv.cetakHistory||[]), {tgl:nowTime(), tipe, noSurat, format}]});
+  await addHistory(id, `Cetak ${format}: ${tipe} — ${noSurat||"-"}`);
 }
 
-function doPrintPDF() {
+async function doPrintPDF() {
   const opts = getOpts();
   const ids  = printTargetId ? [printTargetId] : [...APP_STATE.selectedIds];
   if(!ids.length) return;
@@ -290,12 +290,13 @@ function doPrintPDF() {
     <style>@media print{body{margin:15mm;} @page{margin:15mm;}}</style></head>
     <body>${html}<script>window.onload=()=>{setTimeout(()=>window.print(),500);}<\/script></body></html>`);
   w.document.close();
-  invList.forEach(inv => logCetak(inv.id, opts.tipe, opts.noSurat, "PDF"));
   closePrintModal();
+  // FIXED: sebelumnya diproses BARENGAN (forEach) -- sekarang satu-satu berurutan
+  for(const inv of invList) await logCetak(inv.id, opts.tipe, opts.noSurat, "PDF");
   saveStorage();
 }
 
-function doExportWord() {
+async function doExportWord() {
   const opts = getOpts();
   const ids  = printTargetId ? [printTargetId] : [...APP_STATE.selectedIds];
   if(!ids.length) return;
@@ -309,7 +310,8 @@ function doExportWord() {
   a.href = URL.createObjectURL(blob);
   a.download = `Tagihan_${ids.length>1?"Bulk_"+ids.length:invList[0]?.noInvoice}.doc`;
   a.click();
-  invList.forEach(inv => logCetak(inv.id, opts.tipe, opts.noSurat, "Word"));
   closePrintModal();
+  // FIXED: sebelumnya diproses BARENGAN (forEach) -- sekarang satu-satu berurutan
+  for(const inv of invList) await logCetak(inv.id, opts.tipe, opts.noSurat, "Word");
   saveStorage();
 }
