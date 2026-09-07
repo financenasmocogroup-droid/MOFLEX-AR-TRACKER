@@ -131,7 +131,7 @@ function loadStorage() {
   }
 }
 
-function updateInvoice(id, patch) {
+async function updateInvoice(id, patch) {
   let stageChanged = false, newStage = null;
   invoices = invoices.map(inv => {
     if(inv.id !== id) return inv;
@@ -147,13 +147,42 @@ function updateInvoice(id, patch) {
   // History disimpen ke backend lewat addHistory() — sebelumnya perubahan stage cuma
   // ditulis ke state lokal (invoice.history[]) dan gak pernah kekirim ke server sama
   // sekali. Sekarang manggil addHistory() biar konsisten sama aksi lain (FU, enrichment, dll).
-  if(stageChanged) addHistory(id, `Stage → ${newStage}`);
+  if(stageChanged) await addHistory(id, `Stage → ${newStage}`);
 
-  // Sync ke backend
- const inv = getInv(id);
-if(inv && Api.isLoggedIn()) {
-  Api.upsertInvoice(inv).catch(e => console.warn("Sync error:", e));
+  // FIXED: sebelumnya fire-and-forget (gak di-await), jadi kalau dipanggil
+  // berkali-kali beruntun (misal bulk action), semua request nembak BARENGAN ke
+  // Apps Script -> race condition, sebagian gagal ("Failed 0s"). Sekarang
+  // beneran nunggu server selesai dulu, baru resolve -- biar bisa di-await dari
+  // pemanggilnya buat diproses satu-satu berurutan.
+  const inv = getInv(id);
+  if(inv && Api.isLoggedIn()) {
+    try { await Api.upsertInvoice(inv); }
+    catch(e) { console.warn("Sync error:", e); }
   }
+}
+
+// NEW (Opsi 2): versi LOKAL dari updateInvoice() -- cuma ubah state di
+// browser, TANPA nembak request ke server sama sekali. Dipakai di bulk
+// action: proses semua invoice secara lokal dulu (instan), baru di akhir
+// kirim SEMUANYA dalam 1 kali panggilan Api.batchUpsertInvoices(). Beda sama
+// updateInvoice() biasa (tetep dipakai apa adanya buat edit 1 invoice dari
+// detail modal, di situ correctness-per-klik lebih penting daripada speed).
+//
+// PENTING: fungsi ini TIDAK manggil saveStorage() -- pemanggil (bulk
+// function) yang tanggung jawab manggil saveStorage() SEKALI aja setelah
+// loop-nya beres, biar gak nulis localStorage berkali-kali per invoice.
+function updateInvoiceLocal(id, patch) {
+  let stageChanged = false, newStage = null;
+  invoices = invoices.map(inv => {
+    if(inv.id !== id) return inv;
+    const updated = { ...inv, ...patch, updatedAt: today() };
+    if(patch.stage && patch.stage !== inv.stage) {
+      updated.stageUpdatedAt = today();
+      stageChanged = true; newStage = patch.stage;
+    }
+    return updated;
+  });
+  return { stageChanged, newStage };
 }
 
 function getInv(id) { return invoices.find(i => i.id === id); }
@@ -161,9 +190,10 @@ function getInv(id) { return invoices.find(i => i.id === id); }
 // History sekarang murni disimpen di sheet History lewat Api.logHistory — gak lagi
 // nempel di invoice.history[] lokal. Tab History di detail invoice narik langsung dari
 // backend (Api.getHistory) tiap dibuka, jadi semua user liat riwayat yang sama.
-function addHistory(id, aksi) {
+async function addHistory(id, aksi) {
   if(Api.isLoggedIn()) {
-    Api.logHistory(id, aksi).catch(e => console.warn("History sync error:", e));
+    try { await Api.logHistory(id, aksi); }
+    catch(e) { console.warn("History sync error:", e); }
   }
 }
 
@@ -211,21 +241,27 @@ async function addFollowUp(id, data) {
   const fc = APP_STATE.followUpCache[id];
   if(fc && !fc.loading) fc.items = [...fc.items, entry];
 
-  addHistory(id, `Follow Up #${res.followUpCount}${data.promiseToPay ? ` — Promise #${res.promiseNo} (${fmtDate(data.promiseToPay)})` : ""}`);
+  await addHistory(id, `Follow Up #${res.followUpCount}${data.promiseToPay ? ` — Promise #${res.promiseNo} (${fmtDate(data.promiseToPay)})` : ""}`);
 }
 
-function clearFollowUp(id) {
-  updateInvoice(id, { fuCleared:true });
-  addHistory(id, "Follow Up di-clear — siap lunas");
+async function clearFollowUp(id) {
+  await updateInvoice(id, { fuCleared:true });
+  await addHistory(id, "Follow Up di-clear — siap lunas");
+}
+
+async function cancelFuClear(id) {
+  await updateInvoice(id, { fuCleared:false });
+  await addHistory(id, "FU Clear dibatalkan");
+  renderMonitoring();
 }
 
 // ===== ENRICHMENT UPDATE =====
 // Update fields yang dulu diisi manual di EOM — sekarang langsung di sistem
-function updateEnrichment(id, data) {
+async function updateEnrichment(id, data) {
   // data: { problemId, lastRemark, pdcaRemark, updateRemarks, isBukpot, pph23, isRetur, promiseMining, subsequent }
-  updateInvoice(id, { ...data });
+  await updateInvoice(id, { ...data });
   const aksi = data.problemId ? `Problem ID: ${data.problemId}` : "Enrichment updated";
-  addHistory(id, aksi);
+  await addHistory(id, aksi);
 }
 
 // ===== DIVISI DETECTION =====
