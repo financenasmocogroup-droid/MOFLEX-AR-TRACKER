@@ -161,30 +161,6 @@ async function updateInvoice(id, patch) {
   }
 }
 
-// NEW (Opsi 2): versi LOKAL dari updateInvoice() -- cuma ubah state di
-// browser, TANPA nembak request ke server sama sekali. Dipakai di bulk
-// action: proses semua invoice secara lokal dulu (instan), baru di akhir
-// kirim SEMUANYA dalam 1 kali panggilan Api.batchUpsertInvoices(). Beda sama
-// updateInvoice() biasa (tetep dipakai apa adanya buat edit 1 invoice dari
-// detail modal, di situ correctness-per-klik lebih penting daripada speed).
-//
-// PENTING: fungsi ini TIDAK manggil saveStorage() -- pemanggil (bulk
-// function) yang tanggung jawab manggil saveStorage() SEKALI aja setelah
-// loop-nya beres, biar gak nulis localStorage berkali-kali per invoice.
-function updateInvoiceLocal(id, patch) {
-  let stageChanged = false, newStage = null;
-  invoices = invoices.map(inv => {
-    if(inv.id !== id) return inv;
-    const updated = { ...inv, ...patch, updatedAt: today() };
-    if(patch.stage && patch.stage !== inv.stage) {
-      updated.stageUpdatedAt = today();
-      stageChanged = true; newStage = patch.stage;
-    }
-    return updated;
-  });
-  return { stageChanged, newStage };
-}
-
 function getInv(id) { return invoices.find(i => i.id === id); }
 
 // History sekarang murni disimpen di sheet History lewat Api.logHistory — gak lagi
