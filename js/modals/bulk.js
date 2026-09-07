@@ -179,7 +179,18 @@ function toggleBulkSameDay(checked) {
   else if(tglTerima) { tglTerima.disabled = false; }
 }
 
-function applyBulkStage() {
+// FIXED (Opsi 2): applyBulkStage/PlanKirim/Lunas/Dokumen/Cetak sekarang
+// proses SEMUA invoice secara LOKAL dulu (instan, gak ada network call
+// per-invoice), baru kirim SEMUANYA dalam 1 kali panggilan
+// Api.batchUpsertInvoices() di akhir -- gabungan correctness (gak ada lagi
+// race condition, warisan dari fix sequential-await sebelumnya) + speed (1
+// request borongan, bukan N request bolak-balik). applyBulkFollowUp TETAP
+// pakai versi sequential-await (belum dikonversi) karena manggil
+// addFollowUp() yang beda mekanisme (nulis sheet FollowUps, bukan sekadar
+// update invoice) -- itu nunggu endpoint batch khusus follow-up (Tahap D2,
+// belum dibikin).
+
+async function applyBulkStage() {
   const stage = document.getElementById("bulkStageSelect").value;
   const ids = [...APP_STATE.selectedIds];
   const blocked = ids.filter(id => !checkGate(getInv(id), stage).ok);
@@ -188,36 +199,74 @@ function applyBulkStage() {
     toast(`⛔ ${blocked.length} invoice tidak memenuhi syarat: ${reasons.join(", ")}`, "error");
     return;
   }
-  let c = 0;
-  ids.forEach(id => { updateInvoice(id, {stage}); c++; });
+
+  showApiLoader(`Menyiapkan ${ids.length} invoice...`);
+  ids.forEach(id => updateInvoiceLocal(id, {stage}));
+  saveStorage();
+
+  const touched = ids.map(id => getInv(id)).filter(Boolean);
+  showApiLoader(`Menyimpan ${touched.length} invoice ke server...`);
+
+  try {
+    if(Api.isLoggedIn()) {
+      await Api.batchUpsertInvoices(touched);
+      await addHistory("SYSTEM", `Bulk: ${touched.length} invoice → Stage "${stage}"`);
+    }
+  } catch(e) {
+    console.warn("Bulk sync error:", e);
+    hideApiLoader();
+    showApiError(`Gagal menyimpan ${touched.length} invoice ke server. Data masih aman di perangkat ini, coba lagi.`, () => applyBulkStage());
+    return;
+  }
+
+  hideApiLoader();
   APP_STATE.selectedIds.clear();
   rerenderBulkBar();
-  toast(`${c} invoice → "${stage}"`, "success");
+  toast(`${touched.length} invoice → "${stage}"`, "success");
   openBulkModal();
   invalidateCreditCache();
   renderCurrentPage();
 }
 
-function applyBulkPlanKirim() {
+async function applyBulkPlanKirim() {
   const tglKirim  = document.getElementById("bulkPlanKirim")?.value || today();
   const sameDay   = document.getElementById("bulkLangDiterima")?.checked;
   const tglTerima = sameDay ? tglKirim : (document.getElementById("bulkTglTerima")?.value || "");
-  let c = 0;
-  APP_STATE.selectedIds.forEach(id => {
-    const patch = {planKirim: tglKirim};
-    if(tglTerima) patch.tglTerima = tglTerima;
-    updateInvoice(id, patch);
-    if(sameDay) addHistory(id, `Plan kirim & same day terima: ${tglKirim}`);
-    c++;
-  });
+  const ids = [...APP_STATE.selectedIds];
+
+  showApiLoader(`Menyiapkan ${ids.length} invoice...`);
+  const patch = {planKirim: tglKirim};
+  if(tglTerima) patch.tglTerima = tglTerima;
+  ids.forEach(id => updateInvoiceLocal(id, patch));
+  saveStorage();
+
+  const touched = ids.map(id => getInv(id)).filter(Boolean);
+  showApiLoader(`Menyimpan ${touched.length} invoice ke server...`);
+
+  try {
+    if(Api.isLoggedIn()) {
+      await Api.batchUpsertInvoices(touched);
+      const aksi = sameDay
+        ? `Bulk: ${touched.length} invoice → plan kirim & same day terima: ${tglKirim}`
+        : `Bulk: ${touched.length} invoice → plan kirim: ${tglKirim}`;
+      await addHistory("SYSTEM", aksi);
+    }
+  } catch(e) {
+    console.warn("Bulk sync error:", e);
+    hideApiLoader();
+    showApiError(`Gagal menyimpan ${touched.length} invoice ke server. Coba lagi.`, () => applyBulkPlanKirim());
+    return;
+  }
+
+  hideApiLoader();
   APP_STATE.selectedIds.clear();
   rerenderBulkBar();
-  toast(`${c} invoice diset plan kirim`, "success");
+  toast(`${touched.length} invoice diset plan kirim`, "success");
   openBulkModal();
   renderCurrentPage();
 }
 
-function applyBulkFollowUp() {
+async function applyBulkFollowUp() {
   const tgl        = document.getElementById("bulkFuTgl")?.value || today();
   const status     = document.getElementById("bulkFuStatus")?.value || "Sudah FU";
   const alasan     = document.getElementById("bulkFuAlasan")?.value || "";
@@ -225,13 +274,17 @@ function applyBulkFollowUp() {
   const promiseToPay = document.getElementById("bulkFuPromise")?.value || "";
   const problemId  = document.getElementById("bulkFuProblemId")?.value || "";
   const doClear    = document.getElementById("bulkFuClear")?.checked;
+  const ids = [...APP_STATE.selectedIds];
+  showApiLoader(`Memproses 0/${ids.length} invoice...`);
   let c = 0;
-  APP_STATE.selectedIds.forEach(id => {
-    addFollowUp(id, {tgl, status, alasan, remarks, promiseToPay, problemId});
-    if(problemId) saveEnrichmentField(id, "problemId", problemId);
-    if(doClear) clearFollowUp(id);
+  for(const id of ids) {
+    await addFollowUp(id, {tgl, status, alasan, remarks, promiseToPay, problemId});
+    if(problemId) await saveEnrichmentField(id, "problemId", problemId);
+    if(doClear) await clearFollowUp(id);
     c++;
-  });
+    showApiLoader(`Memproses ${c}/${ids.length} invoice...`);
+  }
+  hideApiLoader();
   APP_STATE.selectedIds.clear();
   rerenderBulkBar();
   toast(`Follow Up ditambahkan untuk ${c} invoice`, "success");
@@ -240,26 +293,48 @@ function applyBulkFollowUp() {
   renderCurrentPage();
 }
 
-function applyBulkLunas() {
+async function applyBulkLunas() {
   const tgl          = document.getElementById("bulkLunasDate")?.value || today();
   const nominalInput = parseFloat(document.getElementById("bulkLunasNominal")?.value) || 0;
   const ket          = document.getElementById("bulkLunasKet")?.value || "";
   const ketCustom    = document.getElementById("bulkLunasKetCustom")?.value || "";
-  let c = 0, blocked = 0;
-  APP_STATE.selectedIds.forEach(id => {
+  const ids = [...APP_STATE.selectedIds];
+
+  showApiLoader(`Menyiapkan ${ids.length} invoice...`);
+  let blocked = 0;
+  const eligibleIds = [];
+  ids.forEach(id => {
     const inv = getInv(id);
-    if(!inv.fuCleared) { blocked++; return; }
+    if(!inv || !inv.fuCleared) { blocked++; return; }
     const nominal = nominalInput || inv.total;
-    updateInvoice(id, {
+    updateInvoiceLocal(id, {
       stage:"Lunas", tglLunas:tgl, stageUpdatedAt:tgl,
       nominalDiterima:nominal, selisih:nominal-inv.total,
       keteranganLunas:ket, keteranganLunasCustom:ketCustom,
     });
-    c++;
+    eligibleIds.push(id);
   });
+  saveStorage();
+
+  const touched = eligibleIds.map(id => getInv(id)).filter(Boolean);
+  showApiLoader(`Menyimpan ${touched.length} invoice ke server...`);
+
+  try {
+    if(touched.length && Api.isLoggedIn()) {
+      await Api.batchUpsertInvoices(touched);
+      await addHistory("SYSTEM", `Bulk: ${touched.length} invoice ditandai Lunas`);
+    }
+  } catch(e) {
+    console.warn("Bulk sync error:", e);
+    hideApiLoader();
+    showApiError(`Gagal menyimpan ${touched.length} invoice ke server. Coba lagi.`, () => applyBulkLunas());
+    return;
+  }
+
+  hideApiLoader();
   APP_STATE.selectedIds.clear();
   rerenderBulkBar();
-  toast(`${c} invoice lunas ✅${blocked>0?` · ${blocked} dilewati (FU belum clear)`:""}`, "success");
+  toast(`${touched.length} invoice lunas ✅${blocked>0?` · ${blocked} dilewati (FU belum clear)`:""}`, "success");
   invalidateCreditCache();
   renderCurrentPage();
   openBulkModal();
@@ -269,29 +344,48 @@ function toggleAllBulkDocs(checked) {
   document.querySelectorAll(".bdoc-item").forEach(el => el.checked = checked);
 }
 
-function applyBulkDokumen() {
+async function applyBulkDokumen() {
   const allChecked = document.getElementById("bdoc_ALL")?.checked;
   const checked = allChecked ? DOCS_MASTER : DOCS_MASTER.filter(doc => {
     const el = document.getElementById(`bdoc_${doc.replace(/[\/ ]/g,'_')}`);
     return el && el.checked;
   });
   if(!checked.length) { toast("Pilih minimal 1 dokumen!", "error"); return; }
-  let c = 0;
-  APP_STATE.selectedIds.forEach(id => {
+  const ids = [...APP_STATE.selectedIds];
+
+  showApiLoader(`Menyiapkan ${ids.length} invoice...`);
+  ids.forEach(id => {
     const inv = getInv(id);
     const dok = {...(inv.dokumen||{})};
     checked.forEach(d => dok[d] = true);
-    updateInvoice(id, {dokumen:dok});
-    c++;
+    updateInvoiceLocal(id, {dokumen:dok});
   });
+  saveStorage();
+
+  const touched = ids.map(id => getInv(id)).filter(Boolean);
+  showApiLoader(`Menyimpan ${touched.length} invoice ke server...`);
+
+  try {
+    if(Api.isLoggedIn()) {
+      await Api.batchUpsertInvoices(touched);
+      await addHistory("SYSTEM", `Bulk: dokumen diupdate untuk ${touched.length} invoice`);
+    }
+  } catch(e) {
+    console.warn("Bulk sync error:", e);
+    hideApiLoader();
+    showApiError(`Gagal menyimpan ${touched.length} invoice ke server. Coba lagi.`, () => applyBulkDokumen());
+    return;
+  }
+
+  hideApiLoader();
   APP_STATE.selectedIds.clear();
   rerenderBulkBar();
-  toast(`Dokumen diupdate untuk ${c} invoice`, "success");
+  toast(`Dokumen diupdate untuk ${touched.length} invoice`, "success");
   openBulkModal();
   renderCurrentPage();
 }
 
-function applyBulkCetak(format) {
+async function applyBulkCetak(format) {
   const mode = document.querySelector('input[name="bulkPrintMode"]:checked')?.value || "perlembar";
   const opts = {
     tipe:    document.getElementById("bulkPrintTipe")?.value || "",
@@ -371,9 +465,29 @@ function applyBulkCetak(format) {
     a.click();
   }
 
-  invList.forEach(inv => logCetak(inv.id, opts.tipe, opts.noSurat, format==="pdf"?"PDF":"Word"));
+  // FIXED (Opsi 2): riwayat cetak per invoice diupdate LOKAL dulu, baru
+  // dikirim 1 kali batch -- bukan logCetak() satu-satu berurutan lagi.
+  showApiLoader(`Menyimpan riwayat cetak untuk ${invList.length} invoice...`);
+  invList.forEach(inv => {
+    updateInvoiceLocal(inv.id, {
+      cetakHistory: [...(inv.cetakHistory||[]), {tgl:nowTime(), tipe:opts.tipe, noSurat:opts.noSurat, format}]
+    });
+  });
+  saveStorage();
+
+  const touchedCetak = invList.map(inv => getInv(inv.id)).filter(Boolean);
+  try {
+    if(Api.isLoggedIn()) {
+      await Api.batchUpsertInvoices(touchedCetak);
+      await addHistory("SYSTEM", `Bulk cetak ${format==="pdf"?"PDF":"Word"}: ${opts.tipe} — ${opts.noSurat||"-"} (${touchedCetak.length} invoice)`);
+    }
+  } catch(e) {
+    console.warn("Bulk cetak sync error:", e);
+    toast("File tercetak, tapi gagal simpan riwayat cetak ke server. Cek koneksi.", "error");
+  }
+  hideApiLoader();
+
   APP_STATE.selectedIds.clear();
   rerenderBulkBar();
-  saveStorage();
   openBulkModal();
 }
