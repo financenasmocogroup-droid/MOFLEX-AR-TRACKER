@@ -499,6 +499,13 @@ async function appInit() {
     }
 
     // Load invoices dari backend
+    // NEW: role "head" narik SEMUA invoice dari 24 dealer sekaligus (belum
+    // disaring backend), jadi wajar butuh waktu lebih lama dari role lain --
+    // kasih pesan yang jujur biar gak keliatan kayak nge-hang diem-diem.
+    const currentUser = Api.getUser();
+    if(currentUser && currentUser.role === "head") {
+      showApiLoader("Memuat data dari 24 dealer, mohon tunggu (bisa sampai 1-2 menit)...");
+    }
     const backendInvoices = await Api.getInvoices();
     if(backendInvoices && backendInvoices.length >= 0) {
       invoices = sanitizeInvoiceNumbers(backendInvoices);
