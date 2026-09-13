@@ -90,12 +90,12 @@ const Api = {
     return data;
   },
 
-  async post(body = {}) {
+  async post(body = {}, retryOpts = {}) {
     const res = await fetchWithRetry(BACKEND_URL, {
       method:  "POST",
       headers: { "Content-Type": "text/plain" },
       body:    JSON.stringify({ ...body, token: this.getToken() }),
-    });
+    }, retryOpts);
     const data = await res.json();
     if(data.code === 401) { await this.logout(); throw new Error("Sesi expired"); }
     if(!data.ok) throw new Error(data.error || "Request gagal");
@@ -133,7 +133,16 @@ const Api = {
 
   // ===== INVOICES =====
   async getInvoices() {
-    const data = await this.get({ action: "getInvoices" }, { timeoutMs: 30000 });
+    // FIXED: sebelumnya timeoutMs 30 detik + retries default (2x) -- buat
+    // role "head" yang narik SEMUA invoice dari 24 dealer sekaligus tanpa
+    // disaring backend, satu request aja bisa butuh lebih dari 30 detik.
+    // Ditambah 2x retry (masing-masing nunggu timeout penuh dulu sebelum
+    // nyoba lagi), totalnya bisa numpuk jadi 2-3 menit sebelum akhirnya
+    // gagal total -- padahal requestnya sendiri mungkin cuma butuh sedikit
+    // lebih lama dari 30 detik buat kelar. Dinaikin ke 90 detik, retries
+    // dikurangin ke 1 (biar gak nunggu 3x90 detik = 4.5 menit kalau emang
+    // gagal beneran, bukan cuma lambat).
+    const data = await this.get({ action: "getInvoices" }, { timeoutMs: 90000, retries: 1, retryDelayMs: 3000 });
     return data.invoices || [];
   },
 
@@ -142,11 +151,16 @@ const Api = {
   },
 
   async batchUpsertInvoices(invList) {
-  // Kirim semua sekaligus dalam satu request
+  // FIXED: batchUpsertInvoices baca+tulis ULANG SELURUH sheet Invoices di
+  // backend (bukan cuma baris yang diubah) -- makin gede sheetnya, makin
+  // lama. Timeout default 20 detik (dari fetchWithRetry) kebentur duluan
+  // sebelum server sempet jawab, request keliatan "canceled" di Network tab.
+  // Dinaikin ke 60 detik khusus buat ini, retries dikurangin ke 1 (biar gak
+  // nunggu 3x60 detik kalau emang gagal beneran, bukan cuma lambat).
   const result = await this.post({
     action: "batchUpsertInvoices",
     data: invList,
-  });
+  }, { timeoutMs: 60000, retries: 1, retryDelayMs: 3000 });
   return result;
 },
 
